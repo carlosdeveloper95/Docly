@@ -1,0 +1,2304 @@
+<!doctype html>
+<html lang="pt-PT">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>Docly — Scanner de Documentos</title>
+<meta name="description" content="Scanner de documentos que funciona no browser: deteta os cantos do papel, corrige a perspetiva, aplica filtros e gera PDF. Todo o processamento é local.">
+<meta name="theme-color" content="#f6f7f9" media="(prefers-color-scheme: light)">
+<meta name="theme-color" content="#0e1116" media="(prefers-color-scheme: dark)">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="Docly">
+<meta name="mobile-web-app-capable" content="yes">
+<link rel="manifest" href="manifest.webmanifest">
+<link rel="apple-touch-icon" href="icons/icon-192.png">
+<link rel="icon" type="image/png" sizes="192x192" href="icons/icon-192.png">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='14' fill='%232563eb'/%3E%3Crect x='17' y='12' width='30' height='40' rx='4' fill='%23fff'/%3E%3Cg fill='%232563eb'%3E%3Crect x='23' y='21' width='18' height='3' rx='1.5'/%3E%3Crect x='23' y='29' width='18' height='3' rx='1.5'/%3E%3Crect x='23' y='37' width='11' height='3' rx='1.5'/%3E%3C/g%3E%3C/svg%3E">
+
+<style>
+/* ============================================================
+   Tema — tokens de cor (modo claro e escuro automático)
+   ============================================================ */
+:root{
+  --bg:#f6f7f9;
+  --surface:#ffffff;
+  --surface-2:#eef1f5;
+  --surface-3:#e3e8ef;
+  --text:#121721;
+  --muted:#5b6673;
+  --border:#d8dee7;
+  --primary:#2563eb;
+  --primary-ink:#ffffff;
+  --primary-soft:#e6eeff;
+  --danger:#d33b3b;
+  --ok:#17804a;
+  --warn:#9a6700;
+  --shadow:0 1px 2px rgba(16,24,40,.06), 0 8px 24px rgba(16,24,40,.08);
+  --shadow-lg:0 12px 40px rgba(16,24,40,.18);
+  --r:14px;
+  --r-sm:10px;
+  --stage:#20242c;
+  color-scheme:light;
+  --safe-b:env(safe-area-inset-bottom, 0px);
+}
+/* Modo escuro automático; o botão de tema força claro/escuro via [data-theme]. */
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --bg:#0e1116;
+    --surface:#161b22;
+    --surface-2:#1e242d;
+    --surface-3:#2a313c;
+    --text:#e8edf4;
+    --muted:#9aa7b7;
+    --border:#2b323d;
+    --primary:#4f87ff;
+    --primary-ink:#06112a;
+    --primary-soft:#17233d;
+    --danger:#ff6b6b;
+    --ok:#4ad295;
+    --warn:#e8b34a;
+    --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+    --shadow-lg:0 12px 40px rgba(0,0,0,.55);
+    --stage:#05070a;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --bg:#0e1116;
+  --surface:#161b22;
+  --surface-2:#1e242d;
+  --surface-3:#2a313c;
+  --text:#e8edf4;
+  --muted:#9aa7b7;
+  --border:#2b323d;
+  --primary:#4f87ff;
+  --primary-ink:#06112a;
+  --primary-soft:#17233d;
+  --danger:#ff6b6b;
+  --ok:#4ad295;
+  --warn:#e8b34a;
+  --shadow:0 1px 2px rgba(0,0,0,.4), 0 8px 24px rgba(0,0,0,.35);
+  --shadow-lg:0 12px 40px rgba(0,0,0,.55);
+  --stage:#05070a;
+  color-scheme:dark;
+}
+
+*,*::before,*::after{box-sizing:border-box}
+html,body{height:100%}
+body{
+  margin:0;
+  background:var(--bg);
+  color:var(--text);
+  font:16px/1.45 system-ui,-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
+  -webkit-text-size-adjust:100%;
+  -webkit-tap-highlight-color:transparent;
+  overscroll-behavior-y:contain;
+}
+button,input,select,textarea{font:inherit;color:inherit}
+h1,h2,h3{margin:0;line-height:1.25}
+p{margin:0}
+
+/* ============================================================
+   Estrutura
+   ============================================================ */
+/* Altura fixa do ecrã: só o conteúdo do início rola, para que a barra de
+   ação inferior (Continuar, Guardar página…) nunca fique abaixo da dobra. */
+.app{
+  height:100vh;height:100dvh;
+  display:flex;flex-direction:column;overflow:hidden;
+}
+
+.appbar{
+  position:sticky;top:0;z-index:30;
+  display:flex;align-items:center;gap:10px;
+  padding:10px 14px;
+  background:color-mix(in srgb, var(--bg) 86%, transparent);
+  backdrop-filter:saturate(180%) blur(12px);
+  border-bottom:1px solid var(--border);
+  padding-top:calc(10px + env(safe-area-inset-top, 0px));
+}
+.appbar .logo{width:30px;height:30px;border-radius:9px;flex:0 0 auto}
+.appbar .titles{min-width:0;flex:1}
+.appbar h1{font-size:17px;font-weight:650;letter-spacing:-.01em}
+.appbar .sub{font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.appbar .spacer{flex:1}
+
+main{flex:1;display:flex;flex-direction:column;min-height:0}
+.view{display:none;flex:1;min-height:0;flex-direction:column;overflow:hidden}
+.view.is-active{display:flex}
+/* O ecrã inicial rola por dentro (a lista de páginas pode ser longa). */
+#viewHome > .wrap{flex:1;min-height:0;overflow-y:auto;-webkit-overflow-scrolling:touch}
+
+.wrap{width:100%;max-width:860px;margin:0 auto;padding:14px}
+.pad-b{padding-bottom:18px}
+
+.card{
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:var(--r);
+  box-shadow:var(--shadow);
+  padding:14px;
+}
+.card + .card{margin-top:12px}
+.card h2{font-size:14px;font-weight:650;letter-spacing:.01em;display:flex;align-items:center;gap:8px}
+.card .hint{font-size:13px;color:var(--muted);margin-top:4px}
+
+/* ============================================================
+   Botões
+   ============================================================ */
+.btn{
+  -webkit-appearance:none;appearance:none;
+  display:inline-flex;align-items:center;justify-content:center;gap:8px;
+  min-height:46px;padding:0 16px;
+  border-radius:12px;border:1px solid var(--border);
+  background:var(--surface-2);color:var(--text);
+  font-weight:600;font-size:15px;
+  cursor:pointer;user-select:none;
+  transition:transform .06s ease, background .15s ease, opacity .15s ease;
+}
+.btn:active{transform:scale(.98)}
+.btn:focus-visible{outline:3px solid color-mix(in srgb, var(--primary) 50%, transparent);outline-offset:2px}
+.btn[disabled]{opacity:.5;cursor:not-allowed}
+.btn-primary{background:var(--primary);border-color:transparent;color:var(--primary-ink)}
+.btn-ghost{background:transparent}
+.btn-danger{background:transparent;border-color:color-mix(in srgb, var(--danger) 45%, var(--border));color:var(--danger)}
+.btn-lg{min-height:56px;font-size:16px;border-radius:14px;width:100%}
+.btn-block{width:100%}
+.btn svg{width:20px;height:20px;flex:0 0 auto}
+.icon-btn{
+  -webkit-appearance:none;appearance:none;
+  width:44px;height:44px;display:inline-flex;align-items:center;justify-content:center;
+  border-radius:12px;border:1px solid var(--border);background:var(--surface-2);
+  cursor:pointer;
+}
+.icon-btn:active{transform:scale(.95)}
+.icon-btn[disabled]{opacity:.38;cursor:not-allowed}
+.icon-btn svg{width:20px;height:20px}
+.row{display:flex;gap:10px}
+.row > *{flex:1}
+.grid-2{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+@media (max-width:430px){
+  .btn{font-size:14.5px;padding:0 12px}
+  .btn-lg{font-size:15px}
+  #docCard .row{flex-direction:column}
+}
+
+/* ============================================================
+   Ecrã inicial
+   ============================================================ */
+.hero{
+  display:flex;flex-direction:column;align-items:center;text-align:center;gap:6px;
+  padding:26px 16px 18px;
+}
+.hero .art{
+  width:84px;height:84px;border-radius:22px;
+  background:linear-gradient(145deg, var(--primary), color-mix(in srgb, var(--primary) 55%, #7c3aed));
+  display:grid;place-items:center;color:#fff;box-shadow:var(--shadow);
+  margin-bottom:6px;
+}
+.hero .art svg{width:44px;height:44px}
+.hero h2{font-size:21px;letter-spacing:-.02em}
+.hero p{color:var(--muted);font-size:14px;max-width:34ch}
+
+.privacy{
+  display:flex;align-items:flex-start;gap:8px;
+  margin-top:12px;padding:10px 12px;
+  font-size:12.5px;color:var(--muted);
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);
+}
+.privacy svg{width:16px;height:16px;flex:0 0 auto;margin-top:1px}
+
+/* Lista de páginas */
+.pages{list-style:none;margin:12px 0 0;padding:0;display:flex;flex-direction:column;gap:10px}
+/* Em ecrãs estreitos a linha da página usa duas filas (dados em cima, ações
+   em baixo); a partir de 560px tudo cabe numa só. */
+.page-item{
+  display:grid;
+  grid-template-columns:34px 58px minmax(0,1fr);
+  grid-template-rows:auto auto;
+  gap:6px 10px;align-items:center;
+  background:var(--surface-2);border:1px solid var(--border);border-radius:var(--r-sm);
+  padding:8px;
+  touch-action:pan-y;
+}
+.page-item .drag-handle{grid-row:1 / 3}
+.page-item .thumb{grid-row:1 / 3}
+.page-item .meta{grid-column:3;grid-row:1}
+.page-item .acts{grid-column:3;grid-row:2;justify-content:flex-start}
+@media (min-width:560px){
+  .page-item{grid-template-columns:34px 58px minmax(0,1fr) auto;grid-template-rows:auto}
+  .page-item .acts{grid-column:4;grid-row:1}
+}
+.page-item.dragging{opacity:.45}
+.page-item.drop-target{outline:2px dashed var(--primary);outline-offset:1px}
+.page-item .thumb{
+  width:58px;height:78px;flex:0 0 auto;border-radius:6px;overflow:hidden;
+  background:#fff;border:1px solid var(--border);
+  display:grid;place-items:center;
+}
+.page-item .thumb img{width:100%;height:100%;object-fit:contain;display:block;background:#fff}
+.page-item .meta{flex:1;min-width:0}
+.page-item .meta strong{display:block;font-size:14px;white-space:nowrap}
+.page-item .meta span{display:block;font-size:12px;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.page-item .acts{display:flex;gap:4px;align-items:center}
+.page-item .acts .icon-btn{width:38px;height:38px;border-radius:10px}
+.page-item .acts .icon-btn svg{width:17px;height:17px}
+.drag-handle{cursor:grab;touch-action:none;width:34px;height:40px;font-size:15px;color:var(--muted)}
+
+/* ============================================================
+   Palco de edição (recorte / filtros)
+   ============================================================ */
+.stage-head{
+  display:flex;align-items:center;gap:8px;padding:10px 12px;
+  border-bottom:1px solid var(--border);background:var(--surface);
+}
+.stage-head .t{flex:1;min-width:0}
+.stage-head .t strong{display:block;font-size:15px}
+.stage-head .t span{font-size:12px;color:var(--muted)}
+
+.stage{
+  flex:1;min-height:0;position:relative;   /* contexto para a lupa */
+  background:var(--stage);
+  display:grid;place-items:center;
+  overflow:hidden;
+  padding:14px;
+}
+.stage-inner{position:relative;line-height:0;touch-action:none}
+.stage-inner canvas{display:block;max-width:100%;border-radius:4px}
+
+/* Pontos arrastáveis dos cantos */
+.handle{
+  position:absolute;width:46px;height:46px;margin:-23px 0 0 -23px;
+  border-radius:50%;
+  display:grid;place-items:center;
+  touch-action:none;cursor:grab;
+  z-index:5;
+}
+.handle::after{
+  content:"";width:20px;height:20px;border-radius:50%;
+  background:var(--primary);border:3px solid #fff;
+  box-shadow:0 1px 6px rgba(0,0,0,.5);
+}
+.handle.active::after{transform:scale(1.25)}
+.handle:focus-visible{outline:3px solid #fff;outline-offset:-6px;border-radius:50%}
+
+#loupe{
+  position:absolute;top:10px;left:10px;z-index:8;
+  width:104px;height:104px;border-radius:50%;
+  border:2px solid rgba(255,255,255,.9);
+  box-shadow:var(--shadow-lg);
+  display:none;pointer-events:none;background:#000;
+}
+#loupe.right{left:auto;right:10px}
+#loupe.show{display:block}
+
+/* Barra de ferramentas inferior */
+.toolbar{
+  position:sticky;bottom:0;z-index:20;
+  background:color-mix(in srgb, var(--surface) 92%, transparent);
+  backdrop-filter:saturate(180%) blur(12px);
+  border-top:1px solid var(--border);
+  padding:10px 12px calc(10px + var(--safe-b));
+}
+.toolbar .tools{
+  display:flex;gap:8px;overflow-x:auto;padding-bottom:10px;
+  scrollbar-width:none;-ms-overflow-style:none;
+}
+.toolbar .tools::-webkit-scrollbar{display:none}
+.toolbar .tools .btn{min-height:40px;font-size:14px;padding:0 12px;white-space:nowrap;flex:0 0 auto}
+
+/* Chips de filtro */
+.chips{display:flex;gap:8px;overflow-x:auto;padding:2px 0 10px;scrollbar-width:none}
+.chips::-webkit-scrollbar{display:none}
+.chip{
+  -webkit-appearance:none;appearance:none;
+  flex:0 0 auto;min-height:40px;padding:0 14px;border-radius:999px;
+  border:1px solid var(--border);background:var(--surface-2);color:var(--text);
+  font-size:14px;font-weight:600;cursor:pointer;white-space:nowrap;
+}
+.chip[aria-pressed="true"]{background:var(--primary);border-color:transparent;color:var(--primary-ink)}
+
+/* ============================================================
+   Formulários
+   ============================================================ */
+.field{display:block;margin-top:12px}
+.field:first-child{margin-top:0}
+.field > span{display:block;font-size:13px;font-weight:600;color:var(--muted);margin-bottom:6px}
+.input,.select,.textarea{
+  width:100%;min-height:46px;padding:11px 12px;
+  background:var(--surface-2);color:var(--text);
+  border:1px solid var(--border);border-radius:12px;
+  -webkit-appearance:none;appearance:none;
+}
+.textarea{min-height:84px;resize:vertical}
+.select{background-image:linear-gradient(45deg,transparent 50%,var(--muted) 50%),linear-gradient(135deg,var(--muted) 50%,transparent 50%);background-position:calc(100% - 18px) 50%,calc(100% - 13px) 50%;background-size:5px 5px,5px 5px;background-repeat:no-repeat;padding-right:38px}
+.input:focus,.select:focus,.textarea:focus{outline:none;border-color:var(--primary);box-shadow:0 0 0 3px color-mix(in srgb, var(--primary) 25%, transparent)}
+.seg{display:flex;gap:6px;background:var(--surface-2);border:1px solid var(--border);border-radius:12px;padding:4px}
+.seg button{
+  flex:1;min-height:38px;border:0;border-radius:9px;background:transparent;color:var(--text);
+  font-weight:600;font-size:14px;cursor:pointer;
+}
+.seg button[aria-pressed="true"]{background:var(--surface);box-shadow:var(--shadow)}
+
+/* ============================================================
+   Diálogos / sobreposições / avisos
+   ============================================================ */
+dialog{
+  border:0;padding:0;background:transparent;max-width:100%;max-height:100%;
+  color:var(--text);
+}
+dialog::backdrop{background:rgba(6,9,14,.55);backdrop-filter:blur(2px)}
+.sheet{
+  width:min(560px,100vw);
+  background:var(--surface);
+  border:1px solid var(--border);
+  border-radius:18px 18px 0 0;
+  box-shadow:var(--shadow-lg);
+  padding:16px 16px calc(16px + var(--safe-b));
+  max-height:92vh;overflow:auto;
+}
+dialog{position:fixed;margin:auto auto 0;left:0;right:0;bottom:0;top:auto}
+@media (min-width:700px){
+  dialog{margin:auto;top:0;bottom:0}
+  .sheet{border-radius:18px}
+}
+.sheet-head{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+.sheet-head h3{flex:1;font-size:17px}
+.sheet-actions{display:flex;gap:10px;margin-top:16px}
+.sheet-actions .btn{flex:1}
+
+#overlay{
+  position:fixed;inset:0;z-index:100;
+  display:none;place-items:center;
+  background:rgba(6,9,14,.62);backdrop-filter:blur(3px);
+}
+#overlay.show{display:grid}
+.spin-card{
+  background:var(--surface);border-radius:16px;padding:22px 26px;box-shadow:var(--shadow-lg);
+  display:flex;flex-direction:column;align-items:center;gap:12px;min-width:220px;max-width:min(340px,86vw);
+  text-align:center;
+}
+.spinner{
+  width:34px;height:34px;border-radius:50%;
+  border:3px solid var(--surface-3);border-top-color:var(--primary);
+  animation:spin .8s linear infinite;
+}
+@keyframes spin{to{transform:rotate(360deg)}}
+#overlayLabel{font-size:14px;font-weight:600}
+.bar{width:100%;height:6px;border-radius:999px;background:var(--surface-3);overflow:hidden;display:none}
+.bar.show{display:block}
+.bar > i{display:block;height:100%;width:0;background:var(--primary);transition:width .2s ease}
+
+#toasts{
+  position:fixed;left:50%;transform:translateX(-50%);
+  top:calc(12px + env(safe-area-inset-top, 0px));z-index:200;
+  display:flex;flex-direction:column;gap:8px;align-items:center;
+  width:min(520px,calc(100vw - 24px));pointer-events:none;
+}
+.toast{
+  pointer-events:auto;cursor:pointer;
+  background:var(--surface);border:1px solid var(--border);border-left:4px solid var(--primary);
+  border-radius:12px;box-shadow:var(--shadow-lg);
+  padding:11px 14px;font-size:14px;width:100%;
+  animation:rise .22s ease;
+}
+.toast.err{border-left-color:var(--danger)}
+.toast.ok{border-left-color:var(--ok)}
+.toast.warn{border-left-color:var(--warn)}
+@keyframes rise{from{opacity:0;transform:translateY(-8px)}}
+
+.notice{
+  margin-top:12px;padding:12px;border-radius:12px;font-size:13.5px;
+  background:color-mix(in srgb, var(--warn) 12%, var(--surface));
+  border:1px solid color-mix(in srgb, var(--warn) 40%, var(--border));
+}
+.notice strong{display:block;margin-bottom:3px}
+[hidden]{display:none !important}   /* vence o display das classes (.btn, .card…) */
+.hidden{display:none !important}
+.sr{position:absolute;width:1px;height:1px;overflow:hidden;clip:rect(0 0 0 0);white-space:nowrap}
+.count-badge{
+  display:inline-grid;place-items:center;min-width:22px;height:22px;padding:0 6px;
+  border-radius:999px;background:var(--primary);color:var(--primary-ink);
+  font-size:12px;font-weight:700;
+}
+.foot{padding:18px 4px 6px;text-align:center;font-size:12px;color:var(--muted)}
+</style>
+</head>
+<body>
+<div class="app">
+
+  <!-- ===================== Barra superior ===================== -->
+  <header class="appbar">
+    <svg class="logo" viewBox="0 0 64 64" aria-hidden="true">
+      <rect width="64" height="64" rx="14" fill="#2563eb"/>
+      <rect x="17" y="12" width="30" height="40" rx="4" fill="#fff"/>
+      <g fill="#2563eb">
+        <rect x="23" y="21" width="18" height="3" rx="1.5"/>
+        <rect x="23" y="29" width="18" height="3" rx="1.5"/>
+        <rect x="23" y="37" width="11" height="3" rx="1.5"/>
+      </g>
+    </svg>
+    <div class="titles">
+      <h1>Docly</h1>
+      <div class="sub" id="appSub">Scanner de documentos · processamento local</div>
+    </div>
+    <button class="icon-btn" id="btnTheme" type="button" title="Alternar tema" aria-label="Alternar tema">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round">
+        <path d="M21 12.8A9 9 0 1 1 11.2 3a7 7 0 0 0 9.8 9.8Z"/>
+      </svg>
+    </button>
+  </header>
+
+  <main>
+
+    <!-- ===================== VISTA: Início ===================== -->
+    <section class="view is-active" id="viewHome" aria-label="Documento">
+      <div class="wrap pad-b">
+
+        <!-- Estado vazio -->
+        <div id="emptyState">
+          <div class="hero">
+            <div class="art">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linejoin="round">
+                <path d="M3 7.5 7.8 6l8.4 12L21 16.5"/>
+                <path d="M3 7.5V18a1.5 1.5 0 0 0 1.5 1.5H21V16.5"/>
+                <path d="M7.8 6 3 7.5"/>
+                <rect x="7" y="3" width="12" height="11" rx="1.5" transform="rotate(-6 13 8.5)"/>
+              </svg>
+            </div>
+            <h2>Digitalize qualquer documento</h2>
+            <p>Tire uma fotografia ao papel. O Docly deteta os cantos, endireita a folha e gera um PDF — tudo no seu dispositivo.</p>
+          </div>
+        </div>
+
+        <!-- Páginas do documento -->
+        <div class="card" id="pagesCard" hidden>
+          <h2>Páginas <span class="count-badge" id="pageCount">0</span></h2>
+          <p class="hint">Arraste pela alça <strong>⠿</strong> ou use as setas para reordenar. Toque no lápis para voltar a editar.</p>
+          <ul class="pages" id="pagesList"></ul>
+        </div>
+
+        <!-- Ações do documento -->
+        <div class="card" id="docCard" hidden>
+          <h2>Documento</h2>
+          <label class="field">
+            <span>Nome do ficheiro</span>
+            <input class="input" id="fileName" type="text" autocomplete="off" spellcheck="false" placeholder="Documento_2026-01-01">
+          </label>
+          <div class="field">
+            <span>Qualidade do PDF</span>
+            <div class="seg" id="qualitySeg" role="group" aria-label="Qualidade do PDF">
+              <button type="button" data-q="high" aria-pressed="false">Alta</button>
+              <button type="button" data-q="medium" aria-pressed="true">Média</button>
+              <button type="button" data-q="low" aria-pressed="false">Baixa</button>
+            </div>
+            <p class="hint" id="qualityHint">Equilíbrio entre nitidez e tamanho do ficheiro.</p>
+          </div>
+          <div class="row" style="margin-top:14px">
+            <button class="btn" id="btnDownload" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 3v12m0 0 4.5-4.5M12 15l-4.5-4.5"/><path d="M4 17v2.5A1.5 1.5 0 0 0 5.5 21h13A1.5 1.5 0 0 0 20 19.5V17"/></svg>
+              Descarregar PDF
+            </button>
+            <button class="btn btn-danger" id="btnNewDoc" type="button">
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M9.5 7V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5V7"/><path d="M6.5 7l.8 12.1A1.5 1.5 0 0 0 8.8 20.5h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg>
+              Novo documento
+            </button>
+          </div>
+        </div>
+
+        <!-- Nota de privacidade -->
+        <div class="privacy">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.7" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+            <path d="M12 3 5 6v6c0 4.2 2.9 7.6 7 9 4.1-1.4 7-4.8 7-9V6l-7-3Z"/><path d="M9.3 12.2l1.9 1.9 3.6-3.9"/>
+          </svg>
+          <span><strong>Privacidade:</strong> as imagens e o PDF nunca saem do seu dispositivo. Não existe servidor — todo o tratamento é feito no browser.</span>
+        </div>
+
+        <div class="foot" id="foot">
+          Docly · funciona offline · <span id="cvStatus">visão por computador em espera</span>
+        </div>
+      </div>
+
+      <!-- Barra inferior do ecrã inicial -->
+      <div class="toolbar">
+        <div class="grid-2">
+          <button class="btn btn-primary btn-lg" id="btnCamera" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 8.5h2.6l1.2-2h8.4l1.2 2H20a1 1 0 0 1 1 1v8a1.5 1.5 0 0 1-1.5 1.5h-15A1.5 1.5 0 0 1 3 17.5v-8a1 1 0 0 1 1-1Z"/><circle cx="12" cy="13" r="3.4"/></svg>
+            <span id="btnCameraLabel">Tirar fotografia</span>
+          </button>
+          <button class="btn btn-lg" id="btnGallery" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="5" width="18" height="14" rx="2"/><circle cx="8.5" cy="10" r="1.6"/><path d="M4 17l4.8-4.3a1.5 1.5 0 0 1 2 0L16 17"/><path d="M14 14.4l1.4-1.2a1.5 1.5 0 0 1 2 0L20 15.4"/></svg>
+            Galeria
+          </button>
+        </div>
+        <button class="btn btn-primary btn-lg" id="btnShare" type="button" style="margin-top:10px" hidden>
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M12 16V4m0 0 4 4m-4-4L8 8"/><path d="M4 14v4.5A2.5 2.5 0 0 0 6.5 21h11a2.5 2.5 0 0 0 2.5-2.5V14"/></svg>
+          Partilhar / Enviar por email
+        </button>
+      </div>
+    </section>
+
+    <!-- ===================== VISTA: Recortar ===================== -->
+    <section class="view" id="viewCrop" aria-label="Ajustar cantos">
+      <div class="stage-head">
+        <button class="icon-btn" id="cropBack" type="button" aria-label="Cancelar">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <div class="t">
+          <strong>Ajustar os cantos</strong>
+          <span id="cropHint">Arraste os quatro pontos para as esquinas do papel.</span>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-inner" id="cropStage">
+          <canvas id="cropCanvas"></canvas>
+          <div class="handle" id="h0" tabindex="0" role="button" aria-label="Canto superior esquerdo"></div>
+          <div class="handle" id="h1" tabindex="0" role="button" aria-label="Canto superior direito"></div>
+          <div class="handle" id="h2" tabindex="0" role="button" aria-label="Canto inferior direito"></div>
+          <div class="handle" id="h3" tabindex="0" role="button" aria-label="Canto inferior esquerdo"></div>
+        </div>
+        <canvas id="loupe" width="208" height="208" aria-hidden="true"></canvas>
+      </div>
+
+      <div class="toolbar">
+        <div class="tools">
+          <button class="btn" id="btnAutoDetect" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 9V5.5A1.5 1.5 0 0 1 5.5 4H9M15 4h3.5A1.5 1.5 0 0 1 20 5.5V9M20 15v3.5a1.5 1.5 0 0 1-1.5 1.5H15M9 20H5.5A1.5 1.5 0 0 1 4 18.5V15"/></svg>
+            Detetar
+          </button>
+          <button class="btn" id="btnFullPage" type="button">Página inteira</button>
+          <button class="btn" id="btnRotL" type="button" aria-label="Rodar 90° para a esquerda">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h7a5 5 0 1 1 0 10H7"/><path d="M4 9l3.5-3.5M4 9l3.5 3.5"/></svg>
+            90° esq.
+          </button>
+          <button class="btn" id="btnRotR" type="button" aria-label="Rodar 90° para a direita">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 9h-7a5 5 0 1 0 0 10h4"/><path d="M20 9l-3.5-3.5M20 9l-3.5 3.5"/></svg>
+            90° dir.
+          </button>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnCropCancel" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="btnCropNext" type="button">
+            Continuar
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M9 5l7 7-7 7"/></svg>
+          </button>
+        </div>
+      </div>
+    </section>
+
+    <!-- ===================== VISTA: Filtros ===================== -->
+    <section class="view" id="viewFilter" aria-label="Filtros">
+      <div class="stage-head">
+        <button class="icon-btn" id="filterBack" type="button" aria-label="Voltar ao recorte">
+          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M15 5l-7 7 7 7"/></svg>
+        </button>
+        <div class="t">
+          <strong>Escolher filtro</strong>
+          <span>Pré-visualização em tempo real.</span>
+        </div>
+      </div>
+
+      <div class="stage">
+        <div class="stage-inner">
+          <canvas id="filterCanvas"></canvas>
+        </div>
+      </div>
+
+      <div class="toolbar">
+        <div class="chips" id="filterChips" role="group" aria-label="Filtros">
+          <button class="chip" type="button" data-f="original" aria-pressed="false">Original</button>
+          <button class="chip" type="button" data-f="enhanced" aria-pressed="true">Melhorado</button>
+          <button class="chip" type="button" data-f="gray" aria-pressed="false">Cinzentos</button>
+          <button class="chip" type="button" data-f="bw" aria-pressed="false">Preto e branco</button>
+        </div>
+        <div class="tools">
+          <button class="btn" id="btnRotL2" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 9h7a5 5 0 1 1 0 10H7"/><path d="M4 9l3.5-3.5M4 9l3.5 3.5"/></svg>
+            90° esq.
+          </button>
+          <button class="btn" id="btnRotR2" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M20 9h-7a5 5 0 1 0 0 10h4"/><path d="M20 9l-3.5-3.5M20 9l-3.5 3.5"/></svg>
+            90° dir.
+          </button>
+          <button class="btn" id="btnBackToCrop" type="button">Recortar outra vez</button>
+        </div>
+        <div class="row">
+          <button class="btn" id="btnFilterCancel" type="button">Cancelar</button>
+          <button class="btn btn-primary" id="btnSavePage" type="button">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.5l4.5 4.5L19 7.5"/></svg>
+            <span id="savePageLabel">Guardar página</span>
+          </button>
+        </div>
+      </div>
+    </section>
+
+  </main>
+
+</div>
+
+<!-- Entradas de ficheiro: câmara e galeria -->
+<input type="file" id="inputCamera" accept="image/*" capture="environment" class="sr" tabindex="-1" aria-hidden="true">
+<input type="file" id="inputGallery" accept="image/*" multiple class="sr" tabindex="-1" aria-hidden="true">
+
+<!-- ===================== Diálogo: Partilhar / Email ===================== -->
+<dialog id="dlgShare" aria-labelledby="shareTitle">
+  <form class="sheet" method="dialog" id="shareForm">
+    <div class="sheet-head">
+      <h3 id="shareTitle">Partilhar / Enviar por email</h3>
+      <button class="icon-btn" type="button" id="shareClose" aria-label="Fechar">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M6 6l12 12M18 6 6 18"/></svg>
+      </button>
+    </div>
+    <p class="hint" id="shareSummary">—</p>
+
+    <label class="field">
+      <span>Destinatário (opcional)</span>
+      <input class="input" id="mailTo" type="email" inputmode="email" autocomplete="email" placeholder="nome@exemplo.pt">
+    </label>
+    <label class="field">
+      <span>Assunto</span>
+      <input class="input" id="mailSubject" type="text" placeholder="Documento digitalizado">
+    </label>
+    <label class="field">
+      <span>Mensagem</span>
+      <textarea class="textarea" id="mailBody" placeholder="Boa tarde, segue em anexo o documento digitalizado."></textarea>
+    </label>
+
+    <div class="notice hidden" id="mailtoNotice">
+      <strong>O PDF foi descarregado para o seu dispositivo.</strong>
+      O seu browser não permite anexar ficheiros automaticamente ao email (o <code>mailto:</code> não suporta anexos).
+      Abrimos a mensagem já preenchida — <strong>anexe agora o ficheiro descarregado</strong> antes de enviar.
+    </div>
+
+    <div class="sheet-actions">
+      <button class="btn" type="button" id="shareCancel">Fechar</button>
+      <button class="btn btn-primary" type="button" id="shareGo">Partilhar PDF</button>
+    </div>
+    <p class="hint" style="margin-top:10px">Nada é carregado para a internet: a partilha usa apenas as aplicações instaladas no seu dispositivo.</p>
+  </form>
+</dialog>
+
+<!-- ===================== Diálogo: Confirmação ===================== -->
+<dialog id="dlgConfirm" aria-labelledby="confirmTitle">
+  <div class="sheet">
+    <div class="sheet-head"><h3 id="confirmTitle">Confirmar</h3></div>
+    <p class="hint" id="confirmText">—</p>
+    <div class="sheet-actions">
+      <button class="btn" type="button" id="confirmNo">Cancelar</button>
+      <button class="btn btn-danger" type="button" id="confirmYes">Confirmar</button>
+    </div>
+  </div>
+</dialog>
+
+<!-- ===================== Progresso e avisos ===================== -->
+<div id="overlay" role="alertdialog" aria-live="assertive" aria-busy="true">
+  <div class="spin-card">
+    <div class="spinner" aria-hidden="true"></div>
+    <div id="overlayLabel">A processar…</div>
+    <div class="bar" id="overlayBar"><i></i></div>
+  </div>
+</div>
+<div id="toasts" aria-live="polite"></div>
+
+<!-- jsPDF (geração do PDF). OpenCV.js é carregado só quando é preciso detetar cantos. -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/jspdf/2.5.1/jspdf.umd.min.js" defer></script>
+
+<script>
+'use strict';
+/* ==================================================================
+   Docly — scanner de documentos 100% local
+   ------------------------------------------------------------------
+   Pipeline: foto -> correção EXIF + redimensionamento -> deteção de
+   cantos (OpenCV.js) -> ajuste manual -> homografia + reamostragem
+   bilinear -> filtros -> JPEG -> PDF (jsPDF) -> partilha/email.
+   Nada é enviado para servidores.
+   ================================================================== */
+
+/* ----------------------------- Constantes ----------------------------- */
+const MAX_SIDE        = 2000;    // lado máximo da imagem de origem (protege telemóveis)
+const MAX_OUT_PIXELS  = 3.3e6;   // área máxima da imagem corrigida (~A4 a 180 ppp)
+const PREVIEW_MAX     = 1280;    // lado máximo da pré-visualização de filtros
+const THUMB_W         = 150;     // largura das miniaturas
+const DETECT_MAX      = 720;     // lado máximo usado na deteção de contornos
+const QUALITY = {
+  high:   { jpeg:0.92, maxSide:2000, label:'Alta'  },
+  medium: { jpeg:0.78, maxSide:1600, label:'Média' },
+  low:    { jpeg:0.58, maxSide:1150, label:'Baixa' }
+};
+const OPENCV_URLS = [
+  'https://docs.opencv.org/4.10.0/opencv.js',
+  'https://docs.opencv.org/4.x/opencv.js'
+];
+
+/* ----------------------------- Utilitários ---------------------------- */
+const $  = (s, r = document) => r.querySelector(s);
+const $$ = (s, r = document) => Array.from(r.querySelectorAll(s));
+const clamp = (v, a, b) => (v < a ? a : v > b ? b : v);
+const sleep = (ms = 0) => new Promise(r => setTimeout(r, ms));
+const dist  = (a, b) => Math.hypot(a.x - b.x, a.y - b.y);
+const nowStamp = () => {
+  const d = new Date(), p = n => String(n).padStart(2, '0');
+  return `${d.getFullYear()}-${p(d.getMonth() + 1)}-${p(d.getDate())}`;
+};
+
+/** Erro com mensagem já pensada para o utilizador. */
+class UserError extends Error {}
+
+function makeCanvas(w, h) {
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.round(w));
+  canvas.height = Math.max(1, Math.round(h));
+  return canvas;
+}
+function ctx2d(canvas, readFrequently) {
+  return canvas.getContext('2d', readFrequently ? { willReadFrequently: true } : undefined);
+}
+
+/* Avisos (toasts) */
+function toast(msg, kind = '', ms = 4200) {
+  const host = $('#toasts');
+  while (host.children.length >= 3) host.firstElementChild.remove();  // não empilha avisos
+  const el = document.createElement('div');
+  el.className = 'toast' + (kind ? ' ' + kind : '');
+  el.textContent = msg;
+  el.title = 'Toque para fechar';
+  const dismiss = () => { el.style.opacity = '0'; el.style.transition = 'opacity .25s'; setTimeout(() => el.remove(), 260); };
+  el.addEventListener('click', dismiss);
+  host.appendChild(el);
+  setTimeout(dismiss, ms);
+}
+
+/* Indicador de progresso */
+const overlay = {
+  show(label) {
+    $('#overlayLabel').textContent = label || 'A processar…';
+    $('#overlayBar').classList.remove('show');
+    $('#overlay').classList.add('show');
+  },
+  label(t) { $('#overlayLabel').textContent = t; },
+  progress(ratio) {
+    const bar = $('#overlayBar');
+    if (ratio == null) { bar.classList.remove('show'); return; }
+    bar.classList.add('show');
+    bar.firstElementChild.style.width = clamp(ratio * 100, 0, 100).toFixed(1) + '%';
+  },
+  hide() { $('#overlay').classList.remove('show'); }
+};
+
+/* Diálogo de confirmação reutilizável */
+function confirmDialog(title, text, okLabel = 'Confirmar') {
+  return new Promise(resolve => {
+    const dlg = $('#dlgConfirm');
+    $('#confirmTitle').textContent = title;
+    $('#confirmText').textContent = text;
+    $('#confirmYes').textContent = okLabel;
+    const done = v => { dlg.close(); $('#confirmYes').onclick = null; $('#confirmNo').onclick = null; resolve(v); };
+    $('#confirmYes').onclick = () => done(true);
+    $('#confirmNo').onclick  = () => done(false);
+    dlg.showModal();
+  });
+}
+
+/* ======================================================================
+   1. Leitura da imagem: orientação EXIF + redimensionamento
+   ====================================================================== */
+
+/** Lê a etiqueta EXIF Orientation (1..8) de um JPEG. Devolve 1 se não existir. */
+async function readExifOrientation(file) {
+  try {
+    const buf = await file.slice(0, 256 * 1024).arrayBuffer();
+    const v = new DataView(buf);
+    if (v.byteLength < 4 || v.getUint16(0) !== 0xFFD8) return 1; // não é JPEG
+    let off = 2;
+    while (off + 4 <= v.byteLength) {
+      const marker = v.getUint16(off);
+      if ((marker & 0xFF00) !== 0xFF00) break;
+      if (marker === 0xFFDA) break;                       // começou a imagem
+      const size = v.getUint16(off + 2);
+      if (marker === 0xFFE1 && v.getUint32(off + 4) === 0x45786966) { // "Exif"
+        const tiff = off + 10;
+        const little = v.getUint16(tiff) === 0x4949;
+        const g16 = o => v.getUint16(o, little);
+        const g32 = o => v.getUint32(o, little);
+        const ifd0 = tiff + g32(tiff + 4);
+        const n = g16(ifd0);
+        for (let i = 0; i < n; i++) {
+          const entry = ifd0 + 2 + i * 12;
+          if (g16(entry) === 0x0112) {
+            const o = g16(entry + 8);
+            return (o >= 1 && o <= 8) ? o : 1;
+          }
+        }
+        return 1;
+      }
+      off += 2 + size;
+    }
+  } catch (_) { /* EXIF ilegível: assume orientação normal */ }
+  return 1;
+}
+
+/* Sonda 16x8 (paisagem) com EXIF Orientation=6: se o descodificador aplicar a
+   orientação, fica 8x16. Permite saber, de uma vez por todas, se este browser
+   já roda as imagens sozinho — o Chromium faz isso mesmo com
+   imageOrientation:'none', o Safari e o Firefox nem sempre. */
+const EXIF_PROBE = 'data:image/jpeg;base64,/9j/4AAQSkZJRgABAQAAAQABAAD/4QAiRXhpZgAATU0AKgAAAAgAAQESAAMAAAABAAYAAAAAAAD/2wBDAFA3PEY8MlBGQUZaVVBfeMiCeG5uePWvuZHI////////////////////////////////////////////////////wAALCAAIABABAREA/8QAFAABAAAAAAAAAAAAAAAAAAAAAP/EABQQAQAAAAAAAAAAAAAAAAAAAAD/2gAIAQEAAD8AD//Z';
+let exifProbePromise = null;
+function decoderAppliesExif() {
+  if (exifProbePromise) return exifProbePromise;
+  exifProbePromise = (async () => {
+    const res = { bitmap: false, img: false };
+    try {
+      const blob = await (await fetch(EXIF_PROBE)).blob();
+      if (typeof createImageBitmap === 'function') {
+        try {
+          const bmp = await createImageBitmap(blob, { imageOrientation: 'none' });
+          res.bitmap = bmp.height > bmp.width;
+          if (bmp.close) bmp.close();
+        } catch (_) {}
+      }
+      const url = URL.createObjectURL(blob);
+      try {
+        const im = new Image();
+        await new Promise((ok, no) => { im.onload = ok; im.onerror = no; im.src = url; });
+        res.img = im.naturalHeight > im.naturalWidth;
+      } catch (_) {} finally { URL.revokeObjectURL(url); }
+    } catch (_) { /* sem sonda: assumimos que não aplica e usamos o EXIF lido */ }
+    return res;
+  })();
+  return exifProbePromise;
+}
+
+/** Descodifica o ficheiro de imagem (ImageBitmap, com <img> como alternativa). */
+async function decodeRaw(file) {
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(file, { imageOrientation: 'none' }); }
+    catch (_) { /* segue para o <img> */ }
+  }
+  const url = URL.createObjectURL(file);
+  try {
+    const img = new Image();
+    img.decoding = 'sync';
+    await new Promise((res, rej) => {
+      img.onload = res;
+      img.onerror = () => rej(new UserError('Não foi possível abrir esta imagem.'));
+      img.src = url;
+    });
+    if (img.decode) { try { await img.decode(); } catch (_) {} }
+    img.__viaImg = true;   // este caminho tem a sua própria regra de EXIF
+    return img;
+  } finally {
+    setTimeout(() => URL.revokeObjectURL(url), 10000);
+  }
+}
+
+/** Redução por etapas (divide por 2) para evitar serrilhado em fotos grandes. */
+function halveTo(source, targetW, targetH) {
+  let cur = source, cw = source.width, ch = source.height;
+  while (cw >= targetW * 2 && ch >= targetH * 2 && cw > 2 && ch > 2) {
+    const next = makeCanvas(Math.max(1, cw >> 1), Math.max(1, ch >> 1));
+    const c = ctx2d(next);
+    c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+    c.drawImage(cur, 0, 0, next.width, next.height);
+    cur = next; cw = next.width; ch = next.height;
+  }
+  return cur;
+}
+
+/** Aplica a orientação EXIF e o redimensionamento, devolvendo um canvas. */
+function drawOriented(source, orientation, scale) {
+  const w = Math.max(1, Math.round(source.width * scale));
+  const h = Math.max(1, Math.round(source.height * scale));
+  const base = scale < 0.5 ? halveTo(source, w, h) : source;
+  const swap = orientation >= 5;
+  const canvas = makeCanvas(swap ? h : w, swap ? w : h);
+  const c = ctx2d(canvas);
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  switch (orientation) {
+    case 2: c.transform(-1, 0, 0, 1, w, 0); break;            // espelho horizontal
+    case 3: c.transform(-1, 0, 0, -1, w, h); break;           // 180°
+    case 4: c.transform(1, 0, 0, -1, 0, h); break;            // espelho vertical
+    case 5: c.transform(0, 1, 1, 0, 0, 0); break;
+    case 6: c.transform(0, 1, -1, 0, h, 0); break;            // 90° CW
+    case 7: c.transform(0, -1, -1, 0, h, w); break;
+    case 8: c.transform(0, -1, 1, 0, 0, w); break;            // 90° CCW
+    default: break;
+  }
+  c.drawImage(base, 0, 0, w, h);
+  return canvas;
+}
+
+/** Ficheiro -> canvas pronto a trabalhar (EXIF corrigido, lado máx. MAX_SIDE). */
+async function fileToCanvas(file) {
+  if (!file) throw new UserError('Nenhuma imagem selecionada.');
+  if (file.type && !file.type.startsWith('image/')) {
+    throw new UserError('O ficheiro escolhido não é uma imagem.');
+  }
+  const [orientation, source, probe] = await Promise.all([
+    readExifOrientation(file), decodeRaw(file), decoderAppliesExif()
+  ]);
+  const w = source.width || source.naturalWidth, h = source.height || source.naturalHeight;
+  if (!w || !h) throw new UserError('Imagem inválida ou corrompida.');
+  const scale = Math.min(1, MAX_SIDE / Math.max(w, h));
+  // Se o browser já rodou a imagem ao descodificar, não voltamos a rodar.
+  const autoApplied = source.__viaImg ? probe.img : probe.bitmap;
+  const orient = autoApplied ? 1 : orientation;
+  const canvas = drawOriented(source, orient, scale);
+  if (source.close) { try { source.close(); } catch (_) {} }
+  return canvas;
+}
+
+/** Cópia reduzida de um canvas (lado máximo = max). */
+function fitCanvas(src, max) {
+  const scale = Math.min(1, max / Math.max(src.width, src.height));
+  if (scale === 1) return src;
+  const out = makeCanvas(src.width * scale, src.height * scale);
+  const c = ctx2d(out);
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  c.drawImage(halveTo(src, out.width, out.height), 0, 0, out.width, out.height);
+  return out;
+}
+
+/** Roda um canvas em múltiplos de 90°. */
+function rotateCanvas(src, deg) {
+  const d = ((deg % 360) + 360) % 360;
+  if (d === 0) return src;
+  const swap = d === 90 || d === 270;
+  const out = makeCanvas(swap ? src.height : src.width, swap ? src.width : src.height);
+  const c = ctx2d(out);
+  c.translate(out.width / 2, out.height / 2);
+  c.rotate(d * Math.PI / 180);
+  c.drawImage(src, -src.width / 2, -src.height / 2);
+  return out;
+}
+
+/* ======================================================================
+   2. OpenCV.js — carregamento preguiçoso e deteção de cantos
+   ====================================================================== */
+let cvPromise = null;
+
+function loadScript(src) {
+  return new Promise((res, rej) => {
+    const s = document.createElement('script');
+    s.src = src; s.async = true;
+    s.onload = res;
+    s.onerror = () => rej(new Error('falhou ' + src));
+    document.head.appendChild(s);
+  });
+}
+
+/** Garante que uma promessa nunca fica pendurada para sempre. */
+function withTimeout(promise, ms, msg) {
+  let timer;
+  return Promise.race([
+    promise.finally(() => clearTimeout(timer)),
+    new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(msg || 'timeout')), ms); })
+  ]);
+}
+
+/** Carrega o OpenCV.js (uma única vez) e espera pela inicialização do WASM. */
+function ensureOpenCV() {
+  if (cvPromise) return cvPromise;
+  cvPromise = (async () => {
+    let lastErr = null;
+    for (const url of OPENCV_URLS) {
+      try {
+        // Qualquer etapa pode ficar pendurada (CDN lento, WASM bloqueado):
+        // um tempo-limite global garante que caímos no ajuste manual.
+        const mod = await withTimeout((async () => {
+          await loadScript(url);
+          let m = window.cv;
+          if (typeof m === 'function') m = await m();                 // build "factory"
+          else if (m && typeof m.then === 'function') m = await m;     // build "promise"
+          else if (m && !m.Mat) {                                     // build clássico
+            await new Promise(res => { m.onRuntimeInitialized = res; });
+          }
+          return m;
+        })(), 90000, 'o OpenCV.js demorou demasiado a carregar');
+        if (!mod || !mod.Mat) throw new Error('OpenCV sem Mat');
+        window.cv = mod;
+        $('#cvStatus').textContent = 'deteção automática ativa';
+        return mod;
+      } catch (e) { lastErr = e; }
+    }
+    $('#cvStatus').textContent = 'deteção automática indisponível';
+    throw lastErr || new Error('OpenCV indisponível');
+  })();
+  return cvPromise;
+}
+
+/** Ordena 4 pontos como [superior-esq., superior-dir., inferior-dir., inferior-esq.]. */
+function orderQuad(pts) {
+  const cx = (pts[0].x + pts[1].x + pts[2].x + pts[3].x) / 4;
+  const cy = (pts[0].y + pts[1].y + pts[2].y + pts[3].y) / 4;
+  // Com o eixo Y para baixo, ângulos crescentes = sentido dos ponteiros do relógio.
+  const byAngle = pts.slice().sort((a, b) =>
+    Math.atan2(a.y - cy, a.x - cx) - Math.atan2(b.y - cy, b.x - cx));
+  let start = 0, best = Infinity;
+  byAngle.forEach((p, i) => { const s = p.x + p.y; if (s < best) { best = s; start = i; } });
+  return [0, 1, 2, 3].map(i => byAngle[(start + i) % 4]);
+}
+
+function quadArea(q) { // fórmula do laço (shoelace)
+  let a = 0;
+  for (let i = 0; i < 4; i++) { const p = q[i], n = q[(i + 1) % 4]; a += p.x * n.y - n.x * p.y; }
+  return Math.abs(a) / 2;
+}
+
+/** Rejeita quadriláteros degenerados (ângulos muito agudos ou lados minúsculos). */
+function plausibleQuad(q, w, h) {
+  const area = quadArea(q);
+  if (area < 0.12 * w * h) return false;
+  for (let i = 0; i < 4; i++) {
+    const p0 = q[(i + 3) % 4], p1 = q[i], p2 = q[(i + 1) % 4];
+    const v1 = { x: p0.x - p1.x, y: p0.y - p1.y }, v2 = { x: p2.x - p1.x, y: p2.y - p1.y };
+    const l1 = Math.hypot(v1.x, v1.y), l2 = Math.hypot(v2.x, v2.y);
+    if (l1 < 0.05 * Math.min(w, h) || l2 < 0.05 * Math.min(w, h)) return false;
+    const cos = Math.abs((v1.x * v2.x + v1.y * v2.y) / (l1 * l2));
+    if (cos > 0.55) return false; // ângulo fora de ~[57°,123°]
+  }
+  return true;
+}
+
+/** Procura o maior quadrilátero plausível numa imagem binária de contornos. */
+function bestQuadFromBinary(cv, bin, w, h) {
+  const contours = new cv.MatVector(), hierarchy = new cv.Mat();
+  let best = null, bestArea = 0;
+  try {
+    cv.findContours(bin, contours, hierarchy, cv.RETR_LIST, cv.CHAIN_APPROX_SIMPLE);
+    for (let i = 0; i < contours.size(); i++) {
+      const cnt = contours.get(i);
+      try {
+        const area = cv.contourArea(cnt);
+        if (area < 0.12 * w * h || area <= bestArea) continue;
+        const peri = cv.arcLength(cnt, true);
+        for (const eps of [0.02, 0.035, 0.05]) {
+          const approx = new cv.Mat();
+          try {
+            cv.approxPolyDP(cnt, approx, eps * peri, true);
+            if (approx.rows !== 4) continue;
+            const pts = [];
+            const pd = approx.data32S;
+            for (let k = 0; k < 4; k++) pts.push({ x: pd[k * 2], y: pd[k * 2 + 1] });
+            const quad = orderQuad(pts);
+            if (!plausibleQuad(quad, w, h)) continue;
+            const a = quadArea(quad);
+            if (a > bestArea) { bestArea = a; best = quad; }
+            break;
+          } finally { approx.delete(); }
+        }
+      } finally { cnt.delete(); }
+    }
+  } finally { contours.delete(); hierarchy.delete(); }
+  return best ? { quad: best, area: bestArea } : null;
+}
+
+/**
+ * Deteta os 4 cantos do papel. Devolve pontos nas coordenadas do canvas
+ * original, ou null se não encontrar nada de confiança.
+ */
+async function detectCorners(srcCanvas) {
+  const cv = await ensureOpenCV();
+  const work = fitCanvas(srcCanvas, DETECT_MAX);
+  const k = srcCanvas.width / work.width;      // fator para voltar à escala original
+  const W = work.width, H = work.height;
+
+  const mats = [];
+  const keep = m => { mats.push(m); return m; };
+  let result = null;
+  try {
+    const src  = keep(cv.imread(work));
+    const gray = keep(new cv.Mat());
+    cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
+    const blur = keep(new cv.Mat());
+    cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
+
+    const kernel = keep(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5)));
+    const candidates = [];
+
+    // Estratégia A — contornos de Canny, fechados morfologicamente.
+    for (const [lo, hi] of [[50, 150], [20, 80], [75, 220]]) {
+      const edges = keep(new cv.Mat());
+      cv.Canny(blur, edges, lo, hi, 3, false);
+      const closed = keep(new cv.Mat());
+      cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel);
+      const hit = bestQuadFromBinary(cv, closed, W, H);
+      if (hit) candidates.push(hit);
+      if (hit && hit.area > 0.5 * W * H) break; // já é bom, poupa trabalho
+    }
+
+    // Estratégia B — binarização de Otsu (bom para papel claro sobre fundo escuro).
+    if (!candidates.length) {
+      const bin = keep(new cv.Mat());
+      cv.threshold(blur, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
+      const closedBin = keep(new cv.Mat());
+      cv.morphologyEx(bin, closedBin, cv.MORPH_CLOSE, kernel);
+      const grad = keep(new cv.Mat());
+      cv.morphologyEx(closedBin, grad, cv.MORPH_GRADIENT, kernel);
+      const hit = bestQuadFromBinary(cv, grad, W, H);
+      if (hit) candidates.push(hit);
+    }
+
+    if (candidates.length) {
+      candidates.sort((a, b) => b.area - a.area);
+      // Ignora deteções que ocupam quase toda a imagem (normalmente é a moldura da foto).
+      const chosen = candidates.find(c => c.area < 0.985 * W * H) || candidates[0];
+      result = chosen.quad.map(p => ({
+        x: clamp(p.x * k, 0, srcCanvas.width),
+        y: clamp(p.y * k, 0, srcCanvas.height)
+      }));
+    }
+  } finally {
+    for (const m of mats) { try { m.delete(); } catch (_) {} }
+  }
+  return result;
+}
+
+/** Cantos por defeito: pequena margem dentro da imagem, para ajuste manual. */
+function defaultCorners(w, h) {
+  const mx = w * 0.08, my = h * 0.08;
+  return [
+    { x: mx,     y: my },
+    { x: w - mx, y: my },
+    { x: w - mx, y: h - my },
+    { x: mx,     y: h - my }
+  ];
+}
+
+/* ======================================================================
+   3. Correção de perspetiva (homografia + reamostragem bilinear)
+   ====================================================================== */
+
+/** Resolve o sistema linear A·x = b por eliminação de Gauss com pivotagem. */
+function solveLinear(A, b, n) {
+  for (let col = 0; col < n; col++) {
+    let piv = col;
+    for (let r = col + 1; r < n; r++) if (Math.abs(A[r][col]) > Math.abs(A[piv][col])) piv = r;
+    if (Math.abs(A[piv][col]) < 1e-12) return null;
+    if (piv !== col) { const t = A[piv]; A[piv] = A[col]; A[col] = t; const tb = b[piv]; b[piv] = b[col]; b[col] = tb; }
+    const d = A[col][col];
+    for (let c = col; c < n; c++) A[col][c] /= d;
+    b[col] /= d;
+    for (let r = 0; r < n; r++) {
+      if (r === col) continue;
+      const f = A[r][col];
+      if (!f) continue;
+      for (let c = col; c < n; c++) A[r][c] -= f * A[col][c];
+      b[r] -= f * b[col];
+    }
+  }
+  return b;
+}
+
+/** Homografia que leva os pontos de destino (x,y) aos de origem (u,v). */
+function homography(dstPts, srcPts) {
+  const A = [], b = [];
+  for (let i = 0; i < 4; i++) {
+    const [x, y] = dstPts[i], [u, v] = srcPts[i];
+    A.push([x, y, 1, 0, 0, 0, -x * u, -y * u]); b.push(u);
+    A.push([0, 0, 0, x, y, 1, -x * v, -y * v]); b.push(v);
+  }
+  return solveLinear(A, b, 8);
+}
+
+/**
+ * Corrige a perspetiva do quadrilátero `corners` do canvas de origem,
+ * devolvendo um canvas retangular. Funciona sem OpenCV (JS puro) e
+ * cede o fio de execução de vez em quando para não bloquear a interface.
+ */
+async function warpPerspective(srcCanvas, corners, onProgress) {
+  const [tl, tr, br, bl] = corners;
+  let outW = Math.round(Math.max(dist(tl, tr), dist(bl, br)));
+  let outH = Math.round(Math.max(dist(tl, bl), dist(tr, br)));
+  outW = Math.max(48, outW); outH = Math.max(48, outH);
+  const area = outW * outH;
+  if (area > MAX_OUT_PIXELS) {
+    const k = Math.sqrt(MAX_OUT_PIXELS / area);
+    outW = Math.max(48, Math.round(outW * k));
+    outH = Math.max(48, Math.round(outH * k));
+  }
+
+  const h = homography(
+    [[0, 0], [outW - 1, 0], [outW - 1, outH - 1], [0, outH - 1]],
+    [[tl.x, tl.y], [tr.x, tr.y], [br.x, br.y], [bl.x, bl.y]]
+  );
+  if (!h) throw new UserError('Os cantos escolhidos não formam uma área válida. Ajuste-os e tente de novo.');
+  const [h0, h1, h2, h3, h4, h5, h6, h7] = h;
+
+  const sw = srcCanvas.width, sh = srcCanvas.height;
+  const sdata = ctx2d(srcCanvas, true).getImageData(0, 0, sw, sh).data;
+  const out = makeCanvas(outW, outH);
+  const octx = ctx2d(out, true);
+  const odata = octx.createImageData(outW, outH);
+  const od = odata.data;
+
+  const CHUNK = 64; // linhas por bloco antes de devolver o controlo ao browser
+  for (let y0 = 0; y0 < outH; y0 += CHUNK) {
+    const yEnd = Math.min(outH, y0 + CHUNK);
+    for (let y = y0; y < yEnd; y++) {
+      let o = y * outW * 4;
+      for (let x = 0; x < outW; x++, o += 4) {
+        const den = h6 * x + h7 * y + 1;
+        const u = (h0 * x + h1 * y + h2) / den;
+        const v = (h3 * x + h4 * y + h5) / den;
+        // Interpolação bilinear com coordenadas limitadas à imagem
+        const uu = clamp(u, 0, sw - 1), vv = clamp(v, 0, sh - 1);
+        const x1 = uu | 0, y1 = vv | 0;
+        const x2 = x1 + 1 < sw ? x1 + 1 : x1, y2 = y1 + 1 < sh ? y1 + 1 : y1;
+        const fx = uu - x1, fy = vv - y1;
+        const w11 = (1 - fx) * (1 - fy), w21 = fx * (1 - fy), w12 = (1 - fx) * fy, w22 = fx * fy;
+        const i11 = (y1 * sw + x1) * 4, i21 = (y1 * sw + x2) * 4,
+              i12 = (y2 * sw + x1) * 4, i22 = (y2 * sw + x2) * 4;
+        od[o]     = sdata[i11]     * w11 + sdata[i21]     * w21 + sdata[i12]     * w12 + sdata[i22]     * w22;
+        od[o + 1] = sdata[i11 + 1] * w11 + sdata[i21 + 1] * w21 + sdata[i12 + 1] * w12 + sdata[i22 + 1] * w22;
+        od[o + 2] = sdata[i11 + 2] * w11 + sdata[i21 + 2] * w21 + sdata[i12 + 2] * w12 + sdata[i22 + 2] * w22;
+        od[o + 3] = 255;
+      }
+    }
+    if (onProgress) onProgress(yEnd / outH);
+    await sleep(0);
+  }
+  octx.putImageData(odata, 0, 0);
+  return out;
+}
+
+/* ======================================================================
+   4. Filtros (JS puro — não dependem do OpenCV)
+   ====================================================================== */
+
+/** Luminância aproximada (Rec. 601). */
+function lumaArray(d, n) {
+  const g = new Uint8Array(n);
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    g[i] = (d[o] * 0.299 + d[o + 1] * 0.587 + d[o + 2] * 0.114) | 0;
+  }
+  return g;
+}
+
+/** Imagem integral (soma acumulada) para médias em janela em tempo constante. */
+function integralOf(g, w, h) {
+  const I = new Float64Array((w + 1) * (h + 1));
+  for (let y = 0; y < h; y++) {
+    let rowSum = 0;
+    const o = (y + 1) * (w + 1), p = y * (w + 1);
+    for (let x = 0; x < w; x++) {
+      rowSum += g[y * w + x];
+      I[o + x + 1] = I[p + x + 1] + rowSum;
+    }
+  }
+  return I;
+}
+
+/** Média da janela quadrada de raio r centrada em (x,y). */
+function boxMean(I, w, h, x, y, r) {
+  const x1 = x - r < 0 ? 0 : x - r, y1 = y - r < 0 ? 0 : y - r;
+  const x2 = x + r + 1 > w ? w : x + r + 1, y2 = y + r + 1 > h ? h : y + r + 1;
+  const a = I[y1 * (w + 1) + x1], b = I[y1 * (w + 1) + x2];
+  const c = I[y2 * (w + 1) + x1], d = I[y2 * (w + 1) + x2];
+  return (d - b - c + a) / ((x2 - x1) * (y2 - y1));
+}
+
+/**
+ * Normaliza a iluminação: estima o "fundo" (papel) com uma média de janela
+ * grande e multiplica cada pixel pelo ganho necessário para esse fundo ficar
+ * branco. Remove sombras da mão/telemóvel e vinhetagem.
+ */
+function normalizeIllumination(d, w, h, strength = 1) {
+  const n = w * h;
+  const g = lumaArray(d, n);
+  const I = integralOf(g, w, h);
+  const r = Math.max(12, Math.round(Math.min(w, h) / 7));
+  const target = 238;
+  for (let y = 0, i = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, i++) {
+      const m = boxMean(I, w, h, x, y, r);
+      let gain = target / Math.max(m, 8);
+      gain = 1 + (clamp(gain, 0.65, 3.2) - 1) * strength;
+      const o = i * 4;
+      d[o]     = clamp(d[o]     * gain, 0, 255);
+      d[o + 1] = clamp(d[o + 1] * gain, 0, 255);
+      d[o + 2] = clamp(d[o + 2] * gain, 0, 255);
+    }
+  }
+}
+
+/** Esticamento de níveis por canal, cortando as caudas do histograma. */
+function stretchLevels(d, n, lowPct = 0.004, highPct = 0.004, gamma = 1) {
+  const hist = [new Uint32Array(256), new Uint32Array(256), new Uint32Array(256)];
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    hist[0][d[o]]++; hist[1][d[o + 1]]++; hist[2][d[o + 2]]++;
+  }
+  const luts = [];
+  for (let ch = 0; ch < 3; ch++) {
+    const H = hist[ch];
+    let lo = 0, hi = 255, acc = 0;
+    const loTarget = n * lowPct, hiTarget = n * highPct;
+    for (let v = 0; v < 256; v++) { acc += H[v]; if (acc >= loTarget) { lo = v; break; } }
+    acc = 0;
+    for (let v = 255; v >= 0; v--) { acc += H[v]; if (acc >= hiTarget) { hi = v; break; } }
+    if (hi - lo < 24) { lo = 0; hi = 255; } // histograma degenerado: não mexe
+    const lut = new Uint8ClampedArray(256);
+    for (let v = 0; v < 256; v++) {
+      let t = (v - lo) / (hi - lo);
+      t = clamp(t, 0, 1);
+      if (gamma !== 1) t = Math.pow(t, gamma);
+      lut[v] = Math.round(t * 255);
+    }
+    luts.push(lut);
+  }
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    d[o] = luts[0][d[o]]; d[o + 1] = luts[1][d[o + 1]]; d[o + 2] = luts[2][d[o + 2]];
+  }
+}
+
+/** Contraste em S suave + ligeiro reforço de saturação. */
+function punch(d, n, contrast = 1.14, saturation = 1.12) {
+  const lut = new Uint8ClampedArray(256);
+  for (let v = 0; v < 256; v++) {
+    const t = v / 255;
+    const s = clamp((t - 0.5) * contrast + 0.5, 0, 1);
+    lut[v] = Math.round(s * 255);
+  }
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    let r = lut[d[o]], g = lut[d[o + 1]], b = lut[d[o + 2]];
+    if (saturation !== 1) {
+      const y = r * 0.299 + g * 0.587 + b * 0.114;
+      r = clamp(y + (r - y) * saturation, 0, 255);
+      g = clamp(y + (g - y) * saturation, 0, 255);
+      b = clamp(y + (b - y) * saturation, 0, 255);
+    }
+    d[o] = r; d[o + 1] = g; d[o + 2] = b;
+  }
+}
+
+/** Converte para cinzentos no próprio buffer. */
+function toGray(d, n) {
+  for (let i = 0, o = 0; i < n; i++, o += 4) {
+    const y = (d[o] * 0.299 + d[o + 1] * 0.587 + d[o + 2] * 0.114) | 0;
+    d[o] = d[o + 1] = d[o + 2] = y;
+  }
+}
+
+/**
+ * Limiar adaptativo (média local menos constante) — o filtro "Preto e branco",
+ * pensado para texto limpo mesmo com iluminação irregular.
+ */
+function adaptiveThreshold(d, w, h, offset = 11) {
+  const n = w * h;
+  const g = lumaArray(d, n);
+  // Pequena suavização para não transformar ruído em pontos negros.
+  let Ismall = integralOf(g, w, h);
+  const sm = new Uint8Array(n);
+  for (let y = 0, i = 0; y < h; y++) for (let x = 0; x < w; x++, i++) sm[i] = boxMean(Ismall, w, h, x, y, 1);
+  Ismall = null;                       // liberta memória antes da 2.ª imagem integral
+  const I = integralOf(sm, w, h);
+  const r = clamp(Math.round(Math.min(w, h) / 45), 8, 42);
+  for (let y = 0, i = 0; y < h; y++) {
+    for (let x = 0; x < w; x++, i++) {
+      const m = boxMean(I, w, h, x, y, r);
+      const v = sm[i] > m - offset ? 255 : 0;
+      const o = i * 4;
+      d[o] = d[o + 1] = d[o + 2] = v;
+    }
+  }
+}
+
+/** Aplica um filtro a um canvas, devolvendo um canvas novo. */
+function applyFilter(src, filter) {
+  const out = makeCanvas(src.width, src.height);
+  const octx = ctx2d(out, true);
+  octx.drawImage(src, 0, 0);
+  if (filter === 'original') return out;
+
+  const w = out.width, h = out.height, n = w * h;
+  const img = octx.getImageData(0, 0, w, h);
+  const d = img.data;
+
+  if (filter === 'enhanced') {
+    normalizeIllumination(d, w, h, 0.9);
+    stretchLevels(d, n, 0.004, 0.012);
+    punch(d, n, 1.16, 1.14);
+  } else if (filter === 'gray') {
+    normalizeIllumination(d, w, h, 1);
+    toGray(d, n);
+    stretchLevels(d, n, 0.004, 0.015);
+    punch(d, n, 1.18, 1);
+  } else if (filter === 'bw') {
+    adaptiveThreshold(d, w, h, 11);
+  }
+  octx.putImageData(img, 0, 0);
+  return out;
+}
+
+const FILTER_NAMES = { original: 'Original', enhanced: 'Melhorado', gray: 'Escala de cinzentos', bw: 'Preto e branco' };
+
+/* ======================================================================
+   5. Estado da aplicação
+   ====================================================================== */
+const state = {
+  pages: [],          // páginas guardadas do documento
+  quality: 'medium',
+  queue: [],          // ficheiros à espera de serem tratados
+  editor: null,       // sessão de edição em curso
+  pdf: null,          // { key, promise } — PDF já gerado/em geração
+  seq: 1
+};
+
+const els = {};
+['viewHome','viewCrop','viewFilter','cropCanvas','filterCanvas','cropStage','loupe','pagesList',
+ 'pagesCard','docCard','emptyState','pageCount','fileName','btnShare','inputCamera','inputGallery',
+ 'dlgShare','shareSummary','mailtoNotice','savePageLabel','cropHint','appSub'
+].forEach(id => els[id] = document.getElementById(id));
+
+const dpr = () => Math.min(window.devicePixelRatio || 1, 2.5);
+const cropCtx   = ctx2d(els.cropCanvas);
+const filterCtx = ctx2d(els.filterCanvas);
+const loupeCtx  = ctx2d(els.loupe);
+
+function showView(name) {
+  ['viewHome', 'viewCrop', 'viewFilter'].forEach(v => els[v].classList.toggle('is-active', v === name));
+  window.scrollTo(0, 0);
+}
+function currentView() {
+  return ['viewHome', 'viewCrop', 'viewFilter'].find(v => els[v].classList.contains('is-active'));
+}
+
+/* ======================================================================
+   6. Editor de cantos (vista "Recortar")
+   ====================================================================== */
+
+/** Calcula o tamanho de exibição e prepara o canvas de visualização. */
+function layoutCrop() {
+  const e = state.editor;
+  if (!e) return;
+  const stage = els.cropStage.parentElement;             // .stage
+  const availW = Math.max(160, stage.clientWidth - 28);
+  const availH = Math.max(160, stage.clientHeight - 28);
+  const scale = Math.min(availW / e.srcCanvas.width, availH / e.srcCanvas.height, 1.6);
+  e.viewScale = scale;
+  const dispW = Math.round(e.srcCanvas.width * scale);
+  const dispH = Math.round(e.srcCanvas.height * scale);
+  const ratio = dpr();
+
+  els.cropCanvas.style.width = dispW + 'px';
+  els.cropCanvas.style.height = dispH + 'px';
+  els.cropCanvas.width = Math.round(dispW * ratio);
+  els.cropCanvas.height = Math.round(dispH * ratio);
+  els.cropStage.style.width = dispW + 'px';
+  els.cropStage.style.height = dispH + 'px';
+
+  // Cópia já reduzida da imagem: redesenhar durante o arrasto fica instantâneo.
+  e.dispCanvas = fitCanvas(e.srcCanvas, Math.max(dispW, dispH) * ratio);
+  renderCrop();
+}
+
+function renderCrop() {
+  const e = state.editor;
+  if (!e || !e.corners) return;
+  const W = els.cropCanvas.width, H = els.cropCanvas.height;
+  const s = e.viewScale * dpr();
+  const pts = e.corners.map(p => ({ x: p.x * s, y: p.y * s }));
+
+  cropCtx.setTransform(1, 0, 0, 1, 0, 0);
+  cropCtx.clearRect(0, 0, W, H);
+  cropCtx.drawImage(e.dispCanvas, 0, 0, W, H);
+
+  // Escurece o que fica fora do quadrilátero (regra "even-odd").
+  cropCtx.save();
+  cropCtx.beginPath();
+  cropCtx.rect(0, 0, W, H);
+  cropCtx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < 4; i++) cropCtx.lineTo(pts[i].x, pts[i].y);
+  cropCtx.closePath();
+  cropCtx.fillStyle = 'rgba(4,8,14,.5)';
+  cropCtx.fill('evenodd');
+  cropCtx.restore();
+
+  // Contorno do documento.
+  const accent = getComputedStyle(document.documentElement).getPropertyValue('--primary').trim() || '#2563eb';
+  cropCtx.beginPath();
+  cropCtx.moveTo(pts[0].x, pts[0].y);
+  for (let i = 1; i < 4; i++) cropCtx.lineTo(pts[i].x, pts[i].y);
+  cropCtx.closePath();
+  cropCtx.lineWidth = Math.max(2, 2 * dpr());
+  cropCtx.strokeStyle = accent;
+  cropCtx.stroke();
+
+  // Posiciona os pontos arrastáveis (em pixéis CSS).
+  for (let i = 0; i < 4; i++) {
+    const el = document.getElementById('h' + i);
+    el.style.left = (e.corners[i].x * e.viewScale) + 'px';
+    el.style.top  = (e.corners[i].y * e.viewScale) + 'px';
+  }
+}
+
+/** Lupa de ampliação, para acertar o canto com o dedo. */
+function showLoupe(index) {
+  const e = state.editor;
+  const p = e.corners[index];
+  const size = els.loupe.width;          // 208
+  const zoom = 2.4;
+  const half = size / (2 * zoom);
+  loupeCtx.setTransform(1, 0, 0, 1, 0, 0);
+  loupeCtx.fillStyle = '#000';
+  loupeCtx.fillRect(0, 0, size, size);
+  loupeCtx.save();
+  loupeCtx.beginPath();
+  loupeCtx.arc(size / 2, size / 2, size / 2 - 2, 0, Math.PI * 2);
+  loupeCtx.clip();
+  loupeCtx.drawImage(e.srcCanvas, p.x - half, p.y - half, half * 2, half * 2, 0, 0, size, size);
+  loupeCtx.restore();
+  // Mira
+  loupeCtx.strokeStyle = 'rgba(255,255,255,.95)';
+  loupeCtx.lineWidth = 1.5;
+  loupeCtx.beginPath();
+  loupeCtx.moveTo(size / 2 - 14, size / 2); loupeCtx.lineTo(size / 2 + 14, size / 2);
+  loupeCtx.moveTo(size / 2, size / 2 - 14); loupeCtx.lineTo(size / 2, size / 2 + 14);
+  loupeCtx.stroke();
+  els.loupe.classList.add('show');
+  // Coloca a lupa no lado oposto ao canto que está a ser arrastado.
+  els.loupe.classList.toggle('right', p.x < e.srcCanvas.width / 2);
+}
+const hideLoupe = () => els.loupe.classList.remove('show');
+
+/* Arrasto dos cantos — rato, dedo e caneta através de Pointer Events. */
+for (let i = 0; i < 4; i++) {
+  const handle = document.getElementById('h' + i);
+  handle.addEventListener('pointerdown', ev => {
+    const e = state.editor;
+    if (!e) return;
+    ev.preventDefault();
+    e.userTouched = true;
+    handle.setPointerCapture(ev.pointerId);
+    handle.classList.add('active');
+    showLoupe(i);
+    const rect = els.cropCanvas.getBoundingClientRect();
+    const move = m => {
+      const x = (m.clientX - rect.left) / e.viewScale;
+      const y = (m.clientY - rect.top) / e.viewScale;
+      e.corners[i] = { x: clamp(x, 0, e.srcCanvas.width), y: clamp(y, 0, e.srcCanvas.height) };
+      renderCrop();
+      showLoupe(i);
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      handle.classList.remove('active');
+      hideLoupe();
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+  // Teclado: ajuste fino com as setas.
+  handle.addEventListener('keydown', ev => {
+    const e = state.editor;
+    if (!e) return;
+    const step = ev.shiftKey ? 12 : 3;
+    const map = { ArrowLeft: [-step, 0], ArrowRight: [step, 0], ArrowUp: [0, -step], ArrowDown: [0, step] };
+    const d = map[ev.key];
+    if (!d) return;
+    ev.preventDefault();
+    e.userTouched = true;
+    e.corners[i] = {
+      x: clamp(e.corners[i].x + d[0], 0, e.srcCanvas.width),
+      y: clamp(e.corners[i].y + d[1], 0, e.srcCanvas.height)
+    };
+    renderCrop();
+  });
+}
+
+/** Inicia (ou retoma) a edição de uma imagem. */
+async function startEditor(srcCanvas, opts = {}) {
+  state.editor = {
+    srcCanvas,
+    srcBlob: opts.srcBlob || null,
+    srcDirty: !opts.srcBlob,
+    corners: opts.corners ? opts.corners.map(p => ({ ...p })) : null,
+    postRot: opts.postRot || 0,
+    filter: opts.filter || 'enhanced',
+    pageIndex: (typeof opts.pageIndex === 'number') ? opts.pageIndex : null,
+    warped: null,
+    userTouched: false,
+    previewCache: {}
+  };
+  els.savePageLabel.textContent = state.editor.pageIndex === null ? 'Guardar página' : 'Guardar alterações';
+  syncFilterChips();
+  showView('viewCrop');
+  await sleep(0);              // deixa o layout estabilizar antes de medir
+  if (!state.editor.corners) {
+    state.editor.corners = defaultCorners(srcCanvas.width, srcCanvas.height);
+    layoutCrop();
+    await autoDetect(true);
+  } else {
+    layoutCrop();
+  }
+}
+
+/** Deteção automática dos cantos (com mensagens claras se falhar). */
+async function autoDetect(initial) {
+  const e = state.editor;
+  if (!e) return;
+  const ready = !!(window.cv && window.cv.Mat);
+  // Na primeira utilização o OpenCV.js ainda está a descarregar: em vez de
+  // bloquear o ecrã, deixamos os cantos por defeito e detetamos em segundo
+  // plano — se entretanto o utilizador mexer nos pontos, respeitamos a escolha.
+  const background = initial && !ready;
+  if (background) {
+    els.cropHint.textContent = 'A preparar a deteção automática — já pode ajustar os cantos.';
+  } else {
+    overlay.show(ready ? 'A detetar os cantos…' : 'A preparar a deteção automática (só na primeira vez)…');
+  }
+  try {
+    const found = await detectCorners(e.srcCanvas);
+    if (state.editor !== e) return;                  // já se mudou de imagem
+    if (background && e.userTouched) {
+      els.cropHint.textContent = 'Mantivemos o ajuste que fez.';
+      return;
+    }
+    if (found) {
+      e.corners = found;
+      els.cropHint.textContent = 'Cantos detetados. Verifique e ajuste se for preciso.';
+      if (!initial) toast('Cantos detetados.', 'ok', 2200);
+      else if (background) toast('Cantos detetados automaticamente.', 'ok', 2600);
+    } else {
+      e.corners = defaultCorners(e.srcCanvas.width, e.srcCanvas.height);
+      els.cropHint.textContent = 'Não encontrámos o papel — arraste os pontos para as esquinas.';
+      toast('Não foi possível detetar o documento. Ajuste os quatro cantos à mão.', 'warn', 5000);
+    }
+  } catch (err) {
+    if (state.editor !== e) return;
+    if (!e.corners) e.corners = defaultCorners(e.srcCanvas.width, e.srcCanvas.height);
+    els.cropHint.textContent = 'Deteção automática indisponível — ajuste os cantos à mão.';
+    toast('Deteção automática indisponível (é preciso ligação na primeira utilização). Ajuste os cantos à mão.', 'warn', 6000);
+  } finally {
+    if (!background) overlay.hide();
+    if (state.editor === e) renderCrop();
+  }
+}
+
+/* ======================================================================
+   7. Vista de filtros
+   ====================================================================== */
+function syncFilterChips() {
+  const f = state.editor ? state.editor.filter : 'enhanced';
+  $$('#filterChips .chip').forEach(c => c.setAttribute('aria-pressed', String(c.dataset.f === f)));
+}
+
+function rebuildPreviewBase() {
+  const e = state.editor;
+  e.previewCache = {};
+  e.previewBase = fitCanvas(rotateCanvas(e.warped, e.postRot), PREVIEW_MAX);
+}
+
+async function renderFilter() {
+  const e = state.editor;
+  if (!e || !e.previewBase) return;
+  const f = e.filter;
+  if (!e.previewCache[f]) {
+    await sleep(0);                               // deixa a interface responder ao toque
+    e.previewCache[f] = applyFilter(e.previewBase, f);
+  }
+  const img = e.previewCache[f];
+  const stage = els.filterCanvas.parentElement.parentElement;
+  const availW = Math.max(160, stage.clientWidth - 28);
+  const availH = Math.max(160, stage.clientHeight - 28);
+  const scale = Math.min(availW / img.width, availH / img.height, 1.6);
+  const ratio = dpr();
+  els.filterCanvas.style.width = Math.round(img.width * scale) + 'px';
+  els.filterCanvas.style.height = Math.round(img.height * scale) + 'px';
+  els.filterCanvas.width = Math.round(img.width * scale * ratio);
+  els.filterCanvas.height = Math.round(img.height * scale * ratio);
+  filterCtx.setTransform(1, 0, 0, 1, 0, 0);
+  filterCtx.imageSmoothingQuality = 'high';
+  filterCtx.drawImage(img, 0, 0, els.filterCanvas.width, els.filterCanvas.height);
+}
+
+/** Passo "Continuar": corrige a perspetiva e abre os filtros. */
+async function goToFilters() {
+  const e = state.editor;
+  if (!e) return;
+  overlay.show('A corrigir a perspetiva…');
+  overlay.progress(0);
+  try {
+    e.warped = await warpPerspective(e.srcCanvas, e.corners, p => overlay.progress(p));
+    rebuildPreviewBase();
+    overlay.label('A aplicar o filtro…');
+    overlay.progress(null);
+    showView('viewFilter');
+    await renderFilter();
+  } catch (err) {
+    toast(err instanceof UserError ? err.message : 'Falhou a correção de perspetiva. Tente ajustar os cantos.', 'err', 5500);
+  } finally {
+    overlay.hide();
+  }
+}
+
+/* ======================================================================
+   8. Páginas do documento
+   ====================================================================== */
+function canvasToBlob(canvas, type = 'image/jpeg', quality = 0.92) {
+  return new Promise((res, rej) => {
+    if (canvas.toBlob) {
+      canvas.toBlob(b => b ? res(b) : rej(new UserError('Não foi possível codificar a imagem.')), type, quality);
+    } else {
+      try {
+        const bin = atob(canvas.toDataURL(type, quality).split(',')[1]);
+        const arr = new Uint8Array(bin.length);
+        for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i);
+        res(new Blob([arr], { type }));
+      } catch (err) { rej(new UserError('Não foi possível codificar a imagem.')); }
+    }
+  });
+}
+
+function thumbDataUrl(canvas) {
+  const w = THUMB_W, h = Math.max(1, Math.round(canvas.height * (w / canvas.width)));
+  const t = makeCanvas(w, h);
+  const c = ctx2d(t);
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(halveTo(canvas, w, h), 0, 0, w, h);
+  return t.toDataURL('image/jpeg', 0.7);
+}
+
+async function savePage() {
+  const e = state.editor;
+  if (!e || !e.warped) return;
+  overlay.show('A preparar a página…');
+  try {
+    const rotated = rotateCanvas(e.warped, e.postRot);
+    const finalCanvas = applyFilter(rotated, e.filter);
+    const [outBlob, srcBlob] = await Promise.all([
+      canvasToBlob(finalCanvas, 'image/jpeg', 0.92),
+      e.srcDirty || !e.srcBlob ? canvasToBlob(e.srcCanvas, 'image/jpeg', 0.9) : Promise.resolve(e.srcBlob)
+    ]);
+    const page = {
+      id: state.seq++,
+      srcBlob,
+      corners: e.corners.map(p => ({ ...p })),
+      postRot: e.postRot,
+      filter: e.filter,
+      outBlob, outW: finalCanvas.width, outH: finalCanvas.height,
+      thumb: thumbDataUrl(finalCanvas)
+    };
+    if (e.pageIndex === null) state.pages.push(page);
+    else state.pages[e.pageIndex] = page;
+    invalidatePdf();
+    state.editor = null;
+    renderPages();
+    showView('viewHome');
+    toast(e.pageIndex === null ? 'Página adicionada.' : 'Página atualizada.', 'ok', 2200);
+    await processQueue();
+  } catch (err) {
+    toast(err instanceof UserError ? err.message : 'Não foi possível guardar a página.', 'err');
+  } finally {
+    overlay.hide();
+  }
+}
+
+function renderPages() {
+  const list = els.pagesList;
+  list.innerHTML = '';
+  const n = state.pages.length;
+  els.pageCount.textContent = String(n);
+  els.pagesCard.hidden = n === 0;
+  els.docCard.hidden = n === 0;
+  els.emptyState.hidden = n > 0;
+  els.btnShare.hidden = n === 0;
+  $('#btnCameraLabel').textContent = n === 0 ? 'Tirar fotografia' : 'Adicionar página';
+  els.appSub.textContent = n === 0
+    ? 'Scanner de documentos · processamento local'
+    : `${n} ${n === 1 ? 'página' : 'páginas'} · processamento local`;
+
+  state.pages.forEach((p, i) => {
+    const li = document.createElement('li');
+    li.className = 'page-item';
+    li.dataset.i = String(i);
+    li.innerHTML =
+      '<div class="drag-handle icon-btn" title="Arrastar para reordenar" aria-hidden="true">⠿</div>' +
+      '<div class="thumb"><img alt="Pré-visualização da página ' + (i + 1) + '"></div>' +
+      '<div class="meta"><strong>Página ' + (i + 1) + '</strong><span></span></div>' +
+      '<div class="acts">' +
+        '<button class="icon-btn" data-act="up" title="Mover para cima" aria-label="Mover a página ' + (i + 1) + ' para cima">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 19V6m0 0-6 6m6-6 6 6"/></svg></button>' +
+        '<button class="icon-btn" data-act="down" title="Mover para baixo" aria-label="Mover a página ' + (i + 1) + ' para baixo">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M12 5v13m0 0 6-6m-6 6-6-6"/></svg></button>' +
+        '<button class="icon-btn" data-act="edit" title="Editar" aria-label="Editar a página ' + (i + 1) + '">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round"><path d="M4 20h4L19.5 8.5a2.1 2.1 0 0 0-3-3L5 17v3Z"/><path d="M14.5 5.5l3 3"/></svg></button>' +
+        '<button class="icon-btn" data-act="del" title="Apagar" aria-label="Apagar a página ' + (i + 1) + '" style="color:var(--danger)">' +
+          '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M4 7h16M9.5 7V5.5A1.5 1.5 0 0 1 11 4h2a1.5 1.5 0 0 1 1.5 1.5V7"/><path d="M6.5 7l.8 12.1A1.5 1.5 0 0 0 8.8 20.5h6.4a1.5 1.5 0 0 0 1.5-1.4L17.5 7"/></svg></button>' +
+      '</div>';
+    li.querySelector('img').src = p.thumb;
+    li.querySelector('.meta span').textContent =
+      `${FILTER_NAMES[p.filter]} · ${p.outW}×${p.outH} · ${(p.outBlob.size / 1024).toFixed(0)} kB`;
+    li.querySelector('[data-act="up"]').disabled = i === 0;
+    li.querySelector('[data-act="down"]').disabled = i === n - 1;
+    list.appendChild(li);
+    initPageDrag(li, i);
+  });
+}
+
+/** Reordenar por arrasto (funciona com dedo e com rato). */
+function initPageDrag(li, index) {
+  const handle = li.querySelector('.drag-handle');
+  handle.addEventListener('pointerdown', ev => {
+    ev.preventDefault();
+    handle.setPointerCapture(ev.pointerId);
+    li.classList.add('dragging');
+    let target = index;
+    const move = m => {
+      const under = document.elementFromPoint(m.clientX, m.clientY);
+      const other = under && under.closest ? under.closest('.page-item') : null;
+      $$('.page-item').forEach(x => x.classList.remove('drop-target'));
+      if (other && other !== li) { other.classList.add('drop-target'); target = Number(other.dataset.i); }
+    };
+    const up = () => {
+      handle.removeEventListener('pointermove', move);
+      handle.removeEventListener('pointerup', up);
+      handle.removeEventListener('pointercancel', up);
+      li.classList.remove('dragging');
+      $$('.page-item').forEach(x => x.classList.remove('drop-target'));
+      if (target !== index) movePage(index, target);
+    };
+    handle.addEventListener('pointermove', move);
+    handle.addEventListener('pointerup', up);
+    handle.addEventListener('pointercancel', up);
+  });
+}
+
+function movePage(from, to) {
+  if (to < 0 || to >= state.pages.length || from === to) return;
+  const [p] = state.pages.splice(from, 1);
+  state.pages.splice(to, 0, p);
+  invalidatePdf();
+  renderPages();
+}
+
+async function editPage(index) {
+  const p = state.pages[index];
+  if (!p) return;
+  overlay.show('A abrir a página…');
+  try {
+    const canvas = await fileToCanvas(p.srcBlob);
+    await startEditor(canvas, {
+      srcBlob: p.srcBlob, corners: p.corners, postRot: p.postRot,
+      filter: p.filter, pageIndex: index
+    });
+  } catch (err) {
+    toast('Não foi possível reabrir esta página.', 'err');
+  } finally {
+    overlay.hide();
+  }
+}
+
+async function deletePage(index) {
+  const ok = await confirmDialog('Apagar página',
+    `Quer apagar a página ${index + 1}? Esta ação não pode ser desfeita.`, 'Apagar');
+  if (!ok) return;
+  state.pages.splice(index, 1);
+  invalidatePdf();
+  renderPages();
+  toast('Página apagada.', '', 1800);
+}
+
+/* ======================================================================
+   9. Entrada de imagens (câmara / galeria) e fila
+   ====================================================================== */
+async function handleFiles(fileList) {
+  const files = Array.from(fileList || []).filter(f => !f.type || f.type.startsWith('image/'));
+  if (!files.length) { toast('Escolha uma imagem (JPEG, PNG, HEIC…).', 'warn'); return; }
+  state.queue.push(...files);
+  await processQueue();
+}
+
+async function processQueue() {
+  if (!state.queue.length) return;
+  const file = state.queue.shift();
+  overlay.show('A preparar a imagem…');
+  try {
+    const canvas = await fileToCanvas(file);
+    overlay.hide();
+    if (state.queue.length) toast(`Mais ${state.queue.length} ${state.queue.length === 1 ? 'imagem' : 'imagens'} na fila.`, '', 2600);
+    await startEditor(canvas);
+  } catch (err) {
+    overlay.hide();
+    toast(err instanceof UserError ? err.message
+      : 'Não foi possível ler esta imagem. Se for HEIC, tente exportar como JPEG.', 'err', 6000);
+    await processQueue();  // segue para a próxima da fila
+  }
+}
+
+/* ======================================================================
+   10. Geração do PDF (jsPDF)
+   ====================================================================== */
+function sanitizeName(name) {
+  const clean = (name || '').replace(/[\\/:*?"<>|\u0000-\u001f]/g, '').replace(/\s+/g, ' ').trim();
+  const base = clean.replace(/\.pdf$/i, '') || ('Documento_' + nowStamp());
+  return base.slice(0, 80) + '.pdf';
+}
+const currentFileName = () => sanitizeName(els.fileName.value);
+
+async function waitForJsPDF() {
+  const t0 = Date.now();
+  while (!window.jspdf || !window.jspdf.jsPDF) {
+    if (Date.now() - t0 > 20000) {
+      throw new UserError('A biblioteca de PDF não carregou. Verifique a ligação à internet e recarregue a página.');
+    }
+    await sleep(120);
+  }
+  return window.jspdf.jsPDF;
+}
+
+async function blobToImage(blob) {
+  if (typeof createImageBitmap === 'function') {
+    try { return await createImageBitmap(blob); } catch (_) {}
+  }
+  const url = URL.createObjectURL(blob);
+  try {
+    const img = new Image();
+    await new Promise((res, rej) => { img.onload = res; img.onerror = rej; img.src = url; });
+    return img;
+  } finally { setTimeout(() => URL.revokeObjectURL(url), 10000); }
+}
+
+/** Reduz e recomprime a página para o nível de qualidade escolhido. */
+async function encodeForPdf(page, q) {
+  const img = await blobToImage(page.outBlob);
+  const iw = img.width || img.naturalWidth, ih = img.height || img.naturalHeight;
+  const scale = Math.min(1, q.maxSide / Math.max(iw, ih));
+  const w = Math.max(1, Math.round(iw * scale)), h = Math.max(1, Math.round(ih * scale));
+  const canvas = makeCanvas(w, h);
+  const c = ctx2d(canvas);
+  c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+  c.fillStyle = '#ffffff'; c.fillRect(0, 0, w, h);
+  c.drawImage(scale < 0.5 ? halveTo(img, w, h) : img, 0, 0, w, h);
+  if (img.close) { try { img.close(); } catch (_) {} }
+  return { dataUrl: canvas.toDataURL('image/jpeg', q.jpeg), w, h };
+}
+
+/** Compõe o PDF A4, uma página por imagem, mantendo a proporção. */
+async function buildPdf(opts = {}) {
+  if (!state.pages.length) throw new UserError('Adicione pelo menos uma página antes de gerar o PDF.');
+  const jsPDF = await waitForJsPDF();
+  const q = QUALITY[state.quality];
+  const total = state.pages.length;
+  const MARGIN = 18; // ≈ 6 mm
+  let doc = null;
+
+  for (let i = 0; i < total; i++) {
+    if (!opts.quiet) {
+      overlay.label(`A compor a página ${i + 1} de ${total}…`);
+      overlay.progress(i / total);
+    }
+    const { dataUrl, w, h } = await encodeForPdf(state.pages[i], q);
+    const landscape = w > h;
+    if (!doc) {
+      doc = new jsPDF({ orientation: landscape ? 'landscape' : 'portrait', unit: 'pt', format: 'a4', compress: true });
+    } else {
+      doc.addPage('a4', landscape ? 'landscape' : 'portrait');
+    }
+    const pw = doc.internal.pageSize.getWidth(), ph = doc.internal.pageSize.getHeight();
+    const k = Math.min((pw - 2 * MARGIN) / w, (ph - 2 * MARGIN) / h);
+    const dw = w * k, dh = h * k;
+    doc.addImage(dataUrl, 'JPEG', (pw - dw) / 2, (ph - dh) / 2, dw, dh, 'pg' + i);
+    await sleep(0);
+  }
+  doc.setProperties({ title: currentFileName().replace(/\.pdf$/i, ''), creator: 'Docly', subject: 'Documento digitalizado' });
+  if (!opts.quiet) overlay.progress(1);
+  return doc.output('blob');
+}
+
+const pdfKey = () => state.quality + '|' + state.pages.map(p => p.id).join(',');
+function invalidatePdf() { state.pdf = null; }
+
+/** Devolve o PDF, reutilizando o que já foi gerado para o mesmo conteúdo. */
+function ensurePdf(opts) {
+  const key = pdfKey();
+  if (state.pdf && state.pdf.key === key) return state.pdf.promise;
+  const promise = buildPdf(opts);
+  state.pdf = { key, promise };
+  promise.catch(() => { if (state.pdf && state.pdf.key === key) state.pdf = null; });
+  return promise;
+}
+
+function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url; a.download = filename; a.rel = 'noopener';
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  setTimeout(() => URL.revokeObjectURL(url), 30000);
+}
+
+async function downloadPdf() {
+  overlay.show('A gerar o PDF…');
+  try {
+    const blob = await ensurePdf();
+    downloadBlob(blob, currentFileName());
+    toast('PDF gerado: ' + currentFileName() + ' (' + (blob.size / 1024 / 1024).toFixed(2) + ' MB).', 'ok', 5000);
+  } catch (err) {
+    toast(err instanceof UserError ? err.message : 'Não foi possível gerar o PDF.', 'err', 6000);
+  } finally {
+    overlay.hide();
+  }
+}
+
+/* ======================================================================
+   11. Partilha / envio por email
+   ====================================================================== */
+function mailBodyText() {
+  const body = $('#mailBody').value.trim();
+  return body || 'Boa tarde,\n\nSegue em anexo o documento digitalizado.\n\nCom os melhores cumprimentos.';
+}
+function mailSubjectText() {
+  return $('#mailSubject').value.trim() || currentFileName().replace(/\.pdf$/i, '');
+}
+function mailtoHref() {
+  const to = $('#mailTo').value.trim();
+  return 'mailto:' + encodeURIComponent(to) +
+    '?subject=' + encodeURIComponent(mailSubjectText()) +
+    '&body=' + encodeURIComponent(mailBodyText());
+}
+
+function openShareDialog() {
+  if (!state.pages.length) { toast('Adicione pelo menos uma página.', 'warn'); return; }
+  const n = state.pages.length;
+  els.mailtoNotice.classList.add('hidden');
+  els.shareSummary.textContent =
+    `${n} ${n === 1 ? 'página' : 'páginas'} · qualidade ${QUALITY[state.quality].label} · ${currentFileName()}`;
+  if (!$('#mailSubject').value.trim()) $('#mailSubject').value = currentFileName().replace(/\.pdf$/i, '');
+  els.dlgShare.showModal();
+  // Gera o PDF desde já: a Web Share API exige que share() seja chamada
+  // imediatamente depois do toque, sem esperas longas pelo meio.
+  ensurePdf({ quiet: true }).catch(() => {});
+}
+
+async function doShare() {
+  const btn = $('#shareGo');
+  btn.disabled = true;
+  const prev = btn.textContent;
+  btn.textContent = 'A preparar…';
+  try {
+    const blob = await ensurePdf({ quiet: true });
+    const name = currentFileName();
+    const file = new File([blob], name, { type: 'application/pdf' });
+    const payload = { files: [file], title: mailSubjectText(), text: mailBodyText() };
+
+    if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+      try {
+        await navigator.share(payload);
+        els.dlgShare.close();
+        toast('Documento partilhado.', 'ok', 3000);
+        return;
+      } catch (err) {
+        if (err && (err.name === 'AbortError' || err.name === 'CanceledError')) return; // o utilizador desistiu
+        // Qualquer outro erro: segue para o plano B (descarregar + mailto).
+      }
+    }
+
+    // Plano B: descarrega o PDF e abre o cliente de email já preenchido.
+    downloadBlob(blob, name);
+    els.mailtoNotice.classList.remove('hidden');
+    toast('PDF descarregado. Anexe-o ao email que vamos abrir.', 'warn', 7000);
+    setTimeout(() => { window.location.href = mailtoHref(); }, 700);
+  } catch (err) {
+    toast(err instanceof UserError ? err.message : 'Não foi possível preparar a partilha.', 'err', 6000);
+  } finally {
+    btn.disabled = false;
+    btn.textContent = prev;
+  }
+}
+
+/* ======================================================================
+   12. Ligação dos controlos
+   ====================================================================== */
+function pickFile(input) {
+  input.value = '';          // permite escolher o mesmo ficheiro outra vez
+  input.click();
+}
+$('#btnCamera').addEventListener('click', () => pickFile(els.inputCamera));
+$('#btnGallery').addEventListener('click', () => pickFile(els.inputGallery));
+els.inputCamera.addEventListener('change', ev => handleFiles(ev.target.files));
+els.inputGallery.addEventListener('change', ev => handleFiles(ev.target.files));
+
+// Vista de recorte
+$('#btnAutoDetect').addEventListener('click', () => autoDetect(false));
+$('#btnFullPage').addEventListener('click', () => {
+  const e = state.editor;
+  if (!e) return;
+  e.userTouched = true;
+  e.corners = [
+    { x: 0, y: 0 }, { x: e.srcCanvas.width, y: 0 },
+    { x: e.srcCanvas.width, y: e.srcCanvas.height }, { x: 0, y: e.srcCanvas.height }
+  ];
+  renderCrop();
+});
+function rotateSource(deg) {
+  const e = state.editor;
+  if (!e) return;
+  const W = e.srcCanvas.width, H = e.srcCanvas.height;
+  e.srcCanvas = rotateCanvas(e.srcCanvas, deg);
+  e.srcDirty = true;
+  // Transforma os cantos para o novo sistema de coordenadas.
+  e.corners = e.corners.map(p => deg === 90 ? { x: H - p.y, y: p.x } : { x: p.y, y: W - p.x });
+  e.corners = orderQuad(e.corners);
+  layoutCrop();
+}
+$('#btnRotL').addEventListener('click', () => rotateSource(270));
+$('#btnRotR').addEventListener('click', () => rotateSource(90));
+
+const cancelEdit = async () => {
+  if (state.editor) {
+    const ok = await confirmDialog('Descartar', 'Quer descartar esta digitalização?', 'Descartar');
+    if (!ok) return;
+  }
+  state.editor = null;
+  state.queue = [];
+  showView('viewHome');
+};
+$('#cropBack').addEventListener('click', cancelEdit);
+$('#btnCropCancel').addEventListener('click', cancelEdit);
+$('#btnCropNext').addEventListener('click', goToFilters);
+
+// Vista de filtros
+$('#filterChips').addEventListener('click', ev => {
+  const chip = ev.target.closest('.chip');
+  if (!chip || !state.editor) return;
+  state.editor.filter = chip.dataset.f;
+  syncFilterChips();
+  renderFilter();
+});
+function rotateResult(deg) {
+  const e = state.editor;
+  if (!e || !e.warped) return;
+  e.postRot = (((e.postRot + deg) % 360) + 360) % 360;
+  rebuildPreviewBase();
+  renderFilter();
+}
+$('#btnRotL2').addEventListener('click', () => rotateResult(270));
+$('#btnRotR2').addEventListener('click', () => rotateResult(90));
+$('#filterBack').addEventListener('click', () => { showView('viewCrop'); layoutCrop(); });
+$('#btnBackToCrop').addEventListener('click', () => { showView('viewCrop'); layoutCrop(); });
+$('#btnFilterCancel').addEventListener('click', cancelEdit);
+$('#btnSavePage').addEventListener('click', savePage);
+
+// Lista de páginas
+els.pagesList.addEventListener('click', ev => {
+  const btn = ev.target.closest('button[data-act]');
+  if (!btn) return;
+  const i = Number(btn.closest('.page-item').dataset.i);
+  const act = btn.dataset.act;
+  if (act === 'up') movePage(i, i - 1);
+  else if (act === 'down') movePage(i, i + 1);
+  else if (act === 'edit') editPage(i);
+  else if (act === 'del') deletePage(i);
+});
+
+// Documento
+$('#qualitySeg').addEventListener('click', ev => {
+  const b = ev.target.closest('button[data-q]');
+  if (!b) return;
+  state.quality = b.dataset.q;
+  $$('#qualitySeg button').forEach(x => x.setAttribute('aria-pressed', String(x === b)));
+  const hints = {
+    high: 'Máxima nitidez — ficheiros maiores (ideal para imprimir).',
+    medium: 'Equilíbrio entre nitidez e tamanho do ficheiro.',
+    low: 'Ficheiro pequeno, ideal para enviar por email.'
+  };
+  $('#qualityHint').textContent = hints[state.quality];
+  invalidatePdf();
+  renderPages();
+});
+els.fileName.addEventListener('input', () => { /* o nome não obriga a regerar o PDF */ });
+$('#btnDownload').addEventListener('click', downloadPdf);
+$('#btnShare').addEventListener('click', openShareDialog);
+$('#btnNewDoc').addEventListener('click', async () => {
+  if (!state.pages.length) return;
+  const ok = await confirmDialog('Novo documento',
+    'Vai apagar as ' + state.pages.length + ' página(s) deste documento. Tem a certeza?', 'Apagar tudo');
+  if (!ok) return;
+  state.pages = [];
+  state.queue = [];
+  state.editor = null;
+  invalidatePdf();
+  els.fileName.value = 'Documento_' + nowStamp();
+  renderPages();
+  showView('viewHome');
+  toast('Documento novo criado.', 'ok', 2200);
+});
+
+// Diálogo de partilha
+$('#shareGo').addEventListener('click', doShare);
+$('#shareClose').addEventListener('click', () => els.dlgShare.close());
+$('#shareCancel').addEventListener('click', () => els.dlgShare.close());
+$('#shareForm').addEventListener('submit', ev => ev.preventDefault());
+
+// Tema: automático -> escuro -> claro
+const THEMES = ['auto', 'dark', 'light'];
+function applyTheme(t) {
+  if (t === 'auto') document.documentElement.removeAttribute('data-theme');
+  else document.documentElement.setAttribute('data-theme', t);
+  try { localStorage.setItem('docly-theme', t); } catch (_) {}
+}
+let themeIdx = 0;
+try {
+  const saved = localStorage.getItem('docly-theme');
+  if (saved && THEMES.includes(saved)) { themeIdx = THEMES.indexOf(saved); applyTheme(saved); }
+} catch (_) {}
+$('#btnTheme').addEventListener('click', () => {
+  themeIdx = (themeIdx + 1) % THEMES.length;
+  applyTheme(THEMES[themeIdx]);
+  const names = { auto: 'automático', dark: 'escuro', light: 'claro' };
+  toast('Tema ' + names[THEMES[themeIdx]] + '.', '', 1600);
+});
+
+// Teclado e redimensionamento
+window.addEventListener('keydown', ev => {
+  if (ev.key !== 'Escape') return;
+  const v = currentView();
+  if (v === 'viewFilter') { showView('viewCrop'); layoutCrop(); }
+  else if (v === 'viewCrop') cancelEdit();
+});
+let resizeTimer = null;
+const relayout = () => {
+  clearTimeout(resizeTimer);
+  resizeTimer = setTimeout(() => {
+    const v = currentView();
+    if (v === 'viewCrop') layoutCrop();
+    else if (v === 'viewFilter') renderFilter();
+  }, 120);
+};
+window.addEventListener('resize', relayout);
+window.addEventListener('orientationchange', relayout);
+
+// Evita perder trabalho por engano
+window.addEventListener('beforeunload', ev => {
+  if (state.pages.length || state.editor) { ev.preventDefault(); ev.returnValue = ''; }
+});
+
+/* ======================================================================
+   13. PWA — service worker e arranque
+   ====================================================================== */
+if ('serviceWorker' in navigator) {
+  window.addEventListener('load', () => {
+    navigator.serviceWorker.register('sw.js').catch(() => {
+      // Sem service worker a app continua a funcionar, apenas sem modo offline.
+    });
+  });
+}
+
+els.fileName.value = 'Documento_' + nowStamp();
+renderPages();
+
+// Pré-carrega o OpenCV em segundo plano quando a ligação não é limitada,
+// para que a primeira deteção seja instantânea.
+(() => {
+  const conn = navigator.connection;
+  const slow = conn && (conn.saveData || /2g/.test(conn.effectiveType || ''));
+  if (!slow) setTimeout(() => { ensureOpenCV().catch(() => {}); }, 2500);
+})();
+</script>
+</body>
+</html>

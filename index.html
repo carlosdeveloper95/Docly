@@ -726,7 +726,10 @@ const QUALITY = {
   medium: { jpeg:0.78, maxSide:1600, label:'Média' },
   low:    { jpeg:0.58, maxSide:1150, label:'Baixa' }
 };
+// importScripts() dentro de um worker exige CORS; o jsDelivr serve-o sempre,
+// o docs.opencv.org fica como alternativa.
 const OPENCV_URLS = [
+  'https://cdn.jsdelivr.net/npm/@techstark/opencv-js@4.10.0-release.1/dist/opencv.js',
   'https://docs.opencv.org/4.10.0/opencv.js',
   'https://docs.opencv.org/4.x/opencv.js'
 ];
@@ -973,19 +976,15 @@ function rotateCanvas(src, deg) {
 }
 
 /* ======================================================================
-   2. OpenCV.js — carregamento preguiçoso e deteção de cantos
+   2. Deteção de cantos — OpenCV.js dentro de um Web Worker
+   ----------------------------------------------------------------------
+   O OpenCV.js são ~10 MB de JavaScript mais um módulo WASM. Carregá-lo na
+   thread principal prende a interface vários segundos (num telemóvel, muito
+   mais), por isso vive num worker: a página continua a responder ao toque
+   enquanto ele carrega e enquanto deteta. Se o worker não conseguir carregá-lo
+   — sem rede, CORS, browser antigo — não há recurso à thread principal:
+   mostram-se os cantos por defeito e o utilizador ajusta-os à mão.
    ====================================================================== */
-let cvPromise = null;
-
-function loadScript(src) {
-  return new Promise((res, rej) => {
-    const s = document.createElement('script');
-    s.src = src; s.async = true;
-    s.onload = res;
-    s.onerror = () => rej(new Error('falhou ' + src));
-    document.head.appendChild(s);
-  });
-}
 
 /** Garante que uma promessa nunca fica pendurada para sempre. */
 function withTimeout(promise, ms, msg) {
@@ -994,37 +993,6 @@ function withTimeout(promise, ms, msg) {
     promise.finally(() => clearTimeout(timer)),
     new Promise((_, rej) => { timer = setTimeout(() => rej(new Error(msg || 'timeout')), ms); })
   ]);
-}
-
-/** Carrega o OpenCV.js (uma única vez) e espera pela inicialização do WASM. */
-function ensureOpenCV() {
-  if (cvPromise) return cvPromise;
-  cvPromise = (async () => {
-    let lastErr = null;
-    for (const url of OPENCV_URLS) {
-      try {
-        // Qualquer etapa pode ficar pendurada (CDN lento, WASM bloqueado):
-        // um tempo-limite global garante que caímos no ajuste manual.
-        const mod = await withTimeout((async () => {
-          await loadScript(url);
-          let m = window.cv;
-          if (typeof m === 'function') m = await m();                 // build "factory"
-          else if (m && typeof m.then === 'function') m = await m;     // build "promise"
-          else if (m && !m.Mat) {                                     // build clássico
-            await new Promise(res => { m.onRuntimeInitialized = res; });
-          }
-          return m;
-        })(), 90000, 'o OpenCV.js demorou demasiado a carregar');
-        if (!mod || !mod.Mat) throw new Error('OpenCV sem Mat');
-        window.cv = mod;
-        $('#cvStatus').textContent = 'deteção automática ativa';
-        return mod;
-      } catch (e) { lastErr = e; }
-    }
-    $('#cvStatus').textContent = 'deteção automática indisponível';
-    throw lastErr || new Error('OpenCV indisponível');
-  })();
-  return cvPromise;
 }
 
 /** Ordena 4 pontos como [superior-esq., superior-dir., inferior-dir., inferior-esq.]. */
@@ -1093,33 +1061,22 @@ function bestQuadFromBinary(cv, bin, w, h) {
   return best ? { quad: best, area: bestArea } : null;
 }
 
-/**
- * Deteta os 4 cantos do papel. Devolve pontos nas coordenadas do canvas
- * original, ou null se não encontrar nada de confiança.
- */
-async function detectCorners(srcCanvas) {
-  const cv = await ensureOpenCV();
-  const work = fitCanvas(srcCanvas, DETECT_MAX);
-  const k = srcCanvas.width / work.width;      // fator para voltar à escala original
-  const W = work.width, H = work.height;
-
+/** Pipeline de deteção sobre uma Mat RGBA. Corre no worker. */
+function detectQuadFromMat(cv, src, W, H) {
   const mats = [];
   const keep = m => { mats.push(m); return m; };
-  let result = null;
   try {
-    const src  = keep(cv.imread(work));
     const gray = keep(new cv.Mat());
     cv.cvtColor(src, gray, cv.COLOR_RGBA2GRAY);
     const blur = keep(new cv.Mat());
     cv.GaussianBlur(gray, blur, new cv.Size(5, 5), 0, 0, cv.BORDER_DEFAULT);
-
     const kernel = keep(cv.getStructuringElement(cv.MORPH_RECT, new cv.Size(5, 5)));
     const candidates = [];
 
     // Estratégia A — contornos de Canny, fechados morfologicamente.
-    for (const [lo, hi] of [[50, 150], [20, 80], [75, 220]]) {
+    for (const lohi of [[50, 150], [20, 80], [75, 220]]) {
       const edges = keep(new cv.Mat());
-      cv.Canny(blur, edges, lo, hi, 3, false);
+      cv.Canny(blur, edges, lohi[0], lohi[1], 3, false);
       const closed = keep(new cv.Mat());
       cv.morphologyEx(edges, closed, cv.MORPH_CLOSE, kernel);
       const hit = bestQuadFromBinary(cv, closed, W, H);
@@ -1127,7 +1084,7 @@ async function detectCorners(srcCanvas) {
       if (hit && hit.area > 0.5 * W * H) break; // já é bom, poupa trabalho
     }
 
-    // Estratégia B — binarização de Otsu (bom para papel claro sobre fundo escuro).
+    // Estratégia B — binarização de Otsu (papel claro sobre fundo escuro).
     if (!candidates.length) {
       const bin = keep(new cv.Mat());
       cv.threshold(blur, bin, 0, 255, cv.THRESH_BINARY + cv.THRESH_OTSU);
@@ -1139,19 +1096,118 @@ async function detectCorners(srcCanvas) {
       if (hit) candidates.push(hit);
     }
 
-    if (candidates.length) {
-      candidates.sort((a, b) => b.area - a.area);
-      // Ignora deteções que ocupam quase toda a imagem (normalmente é a moldura da foto).
-      const chosen = candidates.find(c => c.area < 0.985 * W * H) || candidates[0];
-      result = chosen.quad.map(p => ({
-        x: clamp(p.x * k, 0, srcCanvas.width),
-        y: clamp(p.y * k, 0, srcCanvas.height)
-      }));
-    }
+    if (!candidates.length) return null;
+    candidates.sort((a, b) => b.area - a.area);
+    // Ignora deteções que ocupam quase toda a imagem (normalmente a moldura da foto).
+    const chosen = candidates.find(c => c.area < 0.985 * W * H) || candidates[0];
+    return chosen.quad;
   } finally {
     for (const m of mats) { try { m.delete(); } catch (_) {} }
   }
-  return result;
+}
+
+/* Corpo do worker. As funções acima são injetadas por .toString(), para não
+   existirem duas cópias do mesmo algoritmo. */
+const WORKER_MAIN = [
+  "self.onmessage = async function (ev) {",
+  "  var msg = ev.data || {};",
+  "  if (msg.type === 'init') {",
+  "    var ok = false, erro = '';",
+  "    for (var i = 0; i < msg.urls.length; i++) {",
+  "      try {",
+  "        importScripts(msg.urls[i]);",
+  "        var m = self.cv;",
+  "        if (typeof m === 'function') m = await m();",
+  "        else if (m && typeof m.then === 'function') m = await m;",
+  "        else if (m && !m.Mat) await new Promise(function (res) { m.onRuntimeInitialized = res; });",
+  "        if (m && m.Mat) { self.cv = m; ok = true; break; }",
+  "      } catch (e) { erro = String((e && e.message) || e); }",
+  "    }",
+  "    self.postMessage({ type: 'init', ok: ok, erro: erro });",
+  "    return;",
+  "  }",
+  "  if (msg.type === 'detect') {",
+  "    var quad = null, falha = '';",
+  "    try {",
+  "      var cv = self.cv;",
+  "      var src = cv.matFromImageData({ data: new Uint8ClampedArray(msg.buf), width: msg.w, height: msg.h });",
+  "      try { quad = detectQuadFromMat(cv, src, msg.w, msg.h); } finally { src.delete(); }",
+  "    } catch (e) { falha = String((e && e.message) || e); }",
+  "    self.postMessage({ type: 'detect', id: msg.id, quad: quad, erro: falha });",
+  "  }",
+  "};"
+].join('\n');
+
+let detectorWorker = null;
+let detectorPromise = null;
+let detectSeq = 0;
+
+/** Arranca o worker e carrega-lhe o OpenCV. Uma só vez por sessão. */
+function ensureDetector() {
+  if (detectorPromise) return detectorPromise;
+  detectorPromise = (async () => {
+    if (typeof Worker !== 'function') throw new Error('este browser não suporta Web Workers');
+    const source = [
+      orderQuad.toString(),
+      quadArea.toString(),
+      plausibleQuad.toString(),
+      bestQuadFromBinary.toString(),
+      detectQuadFromMat.toString(),
+      WORKER_MAIN
+    ].join('\n\n');
+    const url = URL.createObjectURL(new Blob([source], { type: 'text/javascript' }));
+    const w = new Worker(url);
+    URL.revokeObjectURL(url);
+    try {
+      const resposta = await withTimeout(new Promise((res, rej) => {
+        const onMsg = e => {
+          if (e.data && e.data.type === 'init') { w.removeEventListener('message', onMsg); res(e.data); }
+        };
+        w.addEventListener('message', onMsg);
+        w.addEventListener('error', e => rej(new Error(e.message || 'o worker falhou')));
+        w.postMessage({ type: 'init', urls: OPENCV_URLS });
+      }), 120000, 'o OpenCV.js demorou demasiado a carregar');
+      if (!resposta.ok) throw new Error(resposta.erro || 'OpenCV indisponível');
+      detectorWorker = w;
+      $('#cvStatus').textContent = 'deteção automática ativa';
+      return w;
+    } catch (err) {
+      try { w.terminate(); } catch (_) {}
+      $('#cvStatus').textContent = 'deteção automática indisponível';
+      throw err;
+    }
+  })();
+  detectorPromise.catch(() => { detectorPromise = null; });  // permite nova tentativa
+  return detectorPromise;
+}
+
+/**
+ * Deteta os 4 cantos do papel. Devolve pontos nas coordenadas do canvas
+ * original, ou null se não encontrar nada de confiança. Lança se o OpenCV
+ * não estiver disponível — quem chama cai no ajuste manual.
+ */
+async function detectCorners(srcCanvas) {
+  const w = await ensureDetector();
+  const work = fitCanvas(srcCanvas, DETECT_MAX);
+  const k = srcCanvas.width / work.width;
+  const img = ctx2d(work, true).getImageData(0, 0, work.width, work.height);
+  const id = ++detectSeq;
+  const quad = await withTimeout(new Promise((res, rej) => {
+    const onMsg = e => {
+      const d = e.data;
+      if (!d || d.type !== 'detect' || d.id !== id) return;
+      w.removeEventListener('message', onMsg);
+      if (d.erro) rej(new Error(d.erro)); else res(d.quad);
+    };
+    w.addEventListener('message', onMsg);
+    const buf = img.data.buffer;             // transferido, não copiado
+    w.postMessage({ type: 'detect', id: id, buf: buf, w: work.width, h: work.height }, [buf]);
+  }), 60000, 'a deteção demorou demasiado');
+  if (!quad) return null;
+  return quad.map(p => ({
+    x: clamp(p.x * k, 0, srcCanvas.width),
+    y: clamp(p.y * k, 0, srcCanvas.height)
+  }));
 }
 
 /** Cantos por defeito: pequena margem dentro da imagem, para ajuste manual. */
@@ -1640,15 +1696,15 @@ async function startEditor(srcCanvas, opts = {}) {
 async function autoDetect(initial) {
   const e = state.editor;
   if (!e) return;
-  const ready = !!(window.cv && window.cv.Mat);
+  const ready = !!detectorWorker;          // worker já com o OpenCV carregado
   // Na primeira utilização o OpenCV.js ainda está a descarregar: em vez de
   // bloquear o ecrã, deixamos os cantos por defeito e detetamos em segundo
   // plano — se entretanto o utilizador mexer nos pontos, respeitamos a escolha.
   const background = initial && !ready;
   if (background) {
-    els.cropHint.textContent = 'A preparar a deteção automática — já pode ajustar os cantos.';
+    els.cropHint.textContent = 'A preparar a deteção automática (~10 MB, só a 1.ª vez) — já pode ajustar os cantos.';
   } else {
-    overlay.show(ready ? 'A detetar os cantos…' : 'A preparar a deteção automática (só na primeira vez)…');
+    overlay.show(ready ? 'A detetar os cantos…' : 'A descarregar a deteção automática (~10 MB, só a 1.ª vez)…');
   }
   try {
     const found = await detectCorners(e.srcCanvas);
@@ -2292,13 +2348,8 @@ if ('serviceWorker' in navigator) {
 els.fileName.value = 'Documento_' + nowStamp();
 renderPages();
 
-// Pré-carrega o OpenCV em segundo plano quando a ligação não é limitada,
-// para que a primeira deteção seja instantânea.
-(() => {
-  const conn = navigator.connection;
-  const slow = conn && (conn.saveData || /2g/.test(conn.effectiveType || ''));
-  if (!slow) setTimeout(() => { ensureOpenCV().catch(() => {}); }, 2500);
-})();
+// Nada de pré-carregar o OpenCV: são ~10 MB que ninguém pediu. Só é
+// descarregado quando a primeira deteção o exige, e sempre dentro do worker.
 </script>
 </body>
 </html>

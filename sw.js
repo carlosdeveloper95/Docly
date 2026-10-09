@@ -20,7 +20,7 @@ const SHELL_URLS = [
   './icons/icon-512.png',
   './icons/icon-maskable-512.png'
 ];
-const VENDOR_HOSTS = ['cdnjs.cloudflare.com', 'docs.opencv.org'];
+const VENDOR_HOSTS = ['cdnjs.cloudflare.com', 'cdn.jsdelivr.net', 'docs.opencv.org'];
 
 self.addEventListener('install', event => {
   event.waitUntil(

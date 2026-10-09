@@ -1355,25 +1355,132 @@ function boxMean(I, w, h, x, y, r) {
 }
 
 /**
- * Normaliza a iluminação: estima o "fundo" (papel) com uma média de janela
- * grande e multiplica cada pixel pelo ganho necessário para esse fundo ficar
- * branco. Remove sombras da mão/telemóvel e vinhetagem.
+ * Máximo deslizante separável (fila monotónica), O(1) por pixel.
+ * Serve para estimar o papel: um máximo local **apaga a tinta**, enquanto uma
+ * média seria puxada para baixo por ela — era esse o defeito que deixava as
+ * folhas acinzentadas e os vincos à vista.
  */
-function normalizeIllumination(d, w, h, strength = 1) {
+function maxFilter(src, w, h, r) {
+  const tmp = new Uint8Array(w * h);
+  const out = new Uint8Array(w * h);
+  const idx = new Int32Array(Math.max(w, h) + 1);
+
+  for (let y = 0; y < h; y++) {                    // passagem horizontal
+    const row = y * w;
+    let head = 0, tail = 0;
+    for (let x = 0; x < w + r; x++) {
+      if (x < w) {
+        const v = src[row + x];
+        while (tail > head && src[row + idx[tail - 1]] <= v) tail--;
+        idx[tail++] = x;
+      }
+      const dstX = x - r;
+      if (dstX >= 0 && dstX < w) {
+        while (idx[head] < dstX - r) head++;
+        tmp[row + dstX] = src[row + idx[head]];
+      }
+    }
+  }
+  for (let x = 0; x < w; x++) {                    // passagem vertical
+    let head = 0, tail = 0;
+    for (let y = 0; y < h + r; y++) {
+      if (y < h) {
+        const v = tmp[y * w + x];
+        while (tail > head && tmp[idx[tail - 1] * w + x] <= v) tail--;
+        idx[tail++] = y;
+      }
+      const dstY = y - r;
+      if (dstY >= 0 && dstY < h) {
+        while (idx[head] < dstY - r) head++;
+        out[dstY * w + x] = tmp[idx[head] * w + x];
+      }
+    }
+  }
+  return out;
+}
+
+/** Desfoque de caixa separável com somas correntes — O(1) por pixel, sem imagem integral. */
+function boxBlur(src, w, h, r) {
+  const tmp = new Uint8Array(w * h);
+  const out = new Uint8Array(w * h);
+  for (let y = 0; y < h; y++) {
+    const row = y * w;
+    let sum = 0, count = 0;
+    for (let x = 0; x <= Math.min(r, w - 1); x++) { sum += src[row + x]; count++; }
+    for (let x = 0; x < w; x++) {
+      tmp[row + x] = (sum / count) | 0;
+      const add = x + r + 1, rem = x - r;
+      if (add < w) { sum += src[row + add]; count++; }
+      if (rem >= 0) { sum -= src[row + rem]; count--; }
+    }
+  }
+  for (let x = 0; x < w; x++) {
+    let sum = 0, count = 0;
+    for (let y = 0; y <= Math.min(r, h - 1); y++) { sum += tmp[y * w + x]; count++; }
+    for (let y = 0; y < h; y++) {
+      out[y * w + x] = (sum / count) | 0;
+      const add = y + r + 1, rem = y - r;
+      if (add < h) { sum += tmp[add * w + x]; count++; }
+      if (rem >= 0) { sum -= tmp[rem * w + x]; count--; }
+    }
+  }
+  return out;
+}
+
+/** Extrai um canal (0=R, 1=G, 2=B) para um array contíguo. */
+function channelOf(d, n, c) {
+  const a = new Uint8Array(n);
+  for (let i = 0, o = c; i < n; i++, o += 4) a[i] = d[o];
+  return a;
+}
+
+/** Estimativa do papel: máximo local (apaga a tinta) depois suavizado. */
+function paperBackground(ch, w, h, r) {
+  return boxBlur(maxFilter(ch, w, h, r), w, h, Math.max(2, r >> 1));
+}
+
+/**
+ * Limpa o documento, que é o que faz um scanner parecer um scanner:
+ *   1. estima o papel em cada ponto (máximo local);
+ *   2. divide por ele — achata sombras, vinhetagem e o sombreado dos vincos;
+ *   3. aplica um ponto de branco: tudo o que esteja perto do tom do papel
+ *      passa a branco puro, e o resto é esticado para escurecer a tinta.
+ * É o passo 3 que faltava: sem ele o papel ficava num cinzento ~238 e os
+ * vincos sobreviviam como modulação desse cinzento.
+ */
+function cleanDocument(d, w, h, opts) {
   const n = w * h;
-  const g = lumaArray(d, n);
-  const I = integralOf(g, w, h);
-  const r = Math.max(12, Math.round(Math.min(w, h) / 7));
-  const target = 238;
-  for (let y = 0, i = 0; y < h; y++) {
-    for (let x = 0; x < w; x++, i++) {
-      const m = boxMean(I, w, h, x, y, r);
-      let gain = target / Math.max(m, 8);
-      gain = 1 + (clamp(gain, 0.65, 3.2) - 1) * strength;
-      const o = i * 4;
-      d[o]     = clamp(d[o]     * gain, 0, 255);
-      d[o + 1] = clamp(d[o + 1] * gain, 0, 255);
-      d[o + 2] = clamp(d[o + 2] * gain, 0, 255);
+  // O raio tem de ser maior do que a espessura do traço, senão o "papel"
+  // estimado inclui a própria tinta e o texto desaparece.
+  const r = clamp(Math.round(Math.min(w, h) / 55), 6, 30);
+  const whiteAt = opts.whiteAt, blackAt = opts.blackAt, gamma = opts.gamma;
+  const span = Math.max(0.05, whiteAt - blackAt);
+
+  // Curva aplicada ao rácio pixel/papel (1 = tom do papel), em tabela.
+  const curve = new Uint8ClampedArray(1024);
+  for (let k = 0; k < 1024; k++) {
+    const t = k / 512;                                   // rácio de 0 a ~2
+    if (t >= whiteAt) { curve[k] = 255; continue; }
+    let u = (t - blackAt) / span;
+    u = u < 0 ? 0 : u > 1 ? 1 : u;
+    curve[k] = Math.round(Math.pow(u, gamma) * 255);
+  }
+  const aplica = (v, bg) => curve[Math.min(1023, ((v / (bg < 1 ? 1 : bg)) * 512) | 0)];
+
+  if (opts.gray) {
+    const g = lumaArray(d, n);
+    const bg = paperBackground(g, w, h, r);
+    for (let i = 0, o = 0; i < n; i++, o += 4) {
+      const v = aplica(g[i], bg[i]);
+      d[o] = d[o + 1] = d[o + 2] = v;
+    }
+  } else {
+    // Um fundo por canal: assim o papel fica branco neutro, sem o tom
+    // amarelado ou azulado que a luz ambiente lhe dá.
+    for (let c = 0; c < 3; c++) {
+      const ch = channelOf(d, n, c);
+      const bg = paperBackground(ch, w, h, r);
+      for (let i = 0, o = c; i < n; i++, o += 4) d[o] = aplica(ch[i], bg[i]);
     }
   }
 }
@@ -1471,16 +1578,17 @@ function applyFilter(src, filter) {
   const d = img.data;
 
   if (filter === 'enhanced') {
-    normalizeIllumination(d, w, h, 0.9);
-    stretchLevels(d, n, 0.004, 0.012);
-    punch(d, n, 1.16, 1.14);
+    // Cor mantida, papel branco: o que se quer de um documento com carimbos,
+    // assinaturas a azul ou destaques a marcador.
+    cleanDocument(d, w, h, { whiteAt: 0.88, blackAt: 0.30, gamma: 0.95, gray: false });
+    punch(d, n, 1.04, 1.10);
   } else if (filter === 'gray') {
-    normalizeIllumination(d, w, h, 1);
-    toGray(d, n);
-    stretchLevels(d, n, 0.004, 0.015);
-    punch(d, n, 1.18, 1);
+    cleanDocument(d, w, h, { whiteAt: 0.90, blackAt: 0.28, gamma: 0.95, gray: true });
   } else if (filter === 'bw') {
-    adaptiveThreshold(d, w, h, 11);
+    // Limpa primeiro: o limiar adaptativo aplicado a uma folha já achatada
+    // produz muito menos manchas nos vincos.
+    cleanDocument(d, w, h, { whiteAt: 0.92, blackAt: 0.35, gamma: 1, gray: true });
+    adaptiveThreshold(d, w, h, 14);
   }
   octx.putImageData(img, 0, 0);
   return out;
